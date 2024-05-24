@@ -26,6 +26,7 @@ module.exports = {
       headers: {
         "Content-Type": "application/json",
       },
+      timeout: 30000,
       body: JSON.stringify({
         prompt: `${prompt}`,
         negative_prompt: `${negativePrompt}`,
