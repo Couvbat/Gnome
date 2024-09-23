@@ -41,8 +41,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  await interaction.deferReply();
-
   const { cooldowns } = interaction.client;
 
   if (!cooldowns.has(command.data.name)) {
@@ -59,7 +57,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (now < expirationTime) {
       const expiredTimestamp = Math.round(expirationTime / 1000);
-      return interaction.editReply({
+      return interaction.reply({
         content: `Please wait, you are on a cooldown for \`${command.data.name}\`. You can use it again <t:${expiredTimestamp}:t>.`,
         ephemeral: true,
       });
@@ -70,7 +68,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
   try {
-    await command.execute(interaction);
+    if (command.defer) {
+      await interaction.deferReply();
+      await command.execute(interaction);
+      await interaction.editReply('Done!');
+    } else {
+      await command.execute(interaction);
+    }
   } catch (error) {
     console.error(error);
     await interaction.editReply({
