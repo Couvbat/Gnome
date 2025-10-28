@@ -10,7 +10,7 @@ A Discord.js v14 bot named "Le Gnome" that integrates with Mistral AI for conver
 - `deploy-commands.js`: Standalone script to register slash commands with Discord API
 
 ### Command Structure
-Commands live in `commands/` organized by category folders (e.g., `utility/`). Each command exports:
+Commands live directly in `commands/` folder (flat structure, not nested). Each command exports:
 - `data`: SlashCommandBuilder instance defining command metadata
 - `execute`: Async function handling command logic
 - `cooldown` (optional): String representing seconds (e.g., `"5"`)
@@ -31,7 +31,7 @@ Use `.env.example` as template.
 ## Key Patterns
 
 ### Command Template
-Use `commands/utility/template` as boilerplate for new commands. All commands must:
+Use `commands/template` as boilerplate for new commands. All commands must:
 1. Import `SlashCommandBuilder` from `discord.js`
 2. Export object with `data` and `execute` properties
 3. Use async/await for `execute` function
@@ -71,12 +71,40 @@ Voice receiving capabilities using `@discordjs/voice`:
 ## Development Workflow
 
 ### Adding Commands
-1. Create file in `commands/<category>/` following template structure
-2. Run `node deploy-commands.js` to register with Discord
-3. Restart bot (`node index.js`) to load command handler
+1. Create file in `commands/` following template structure (flat directory, not nested)
+2. Write unit tests in `__tests__/<command-name>.test.js` using Jest
+3. Run `npm test` to verify tests pass
+4. Run `node deploy-commands.js` to register with Discord
+5. Restart bot (`node index.js`) to load command handler
 
 ### Testing
-No test suite configured. Manual testing via Discord client interaction.
+Project uses **Jest** for unit testing. See `TESTING.md` for comprehensive guide.
+
+**Running tests:**
+- `npm test` - Run all tests
+- `npm run test:watch` - Watch mode with auto-reload
+- `npm run test:coverage` - Generate coverage report
+
+**Test structure:**
+- Tests in `__tests__/` directory
+- Mock Discord interactions and external APIs
+- Focus on command behavior, not implementation
+- All tests must pass before deployment
+
+**Key patterns:**
+```javascript
+// Mock interaction
+const mockInteraction = {
+  user: { username: 'TestUser' },
+  options: { getString: jest.fn().mockReturnValue('test') },
+  deferReply: jest.fn().mockResolvedValue(undefined),
+  editReply: jest.fn().mockResolvedValue(undefined)
+};
+
+// Mock external APIs
+jest.mock('undici');
+request.mockResolvedValue({ body: { json: () => ({...}) } });
+```
 
 ### Dependencies
 - `discord.js` v14.15.2: Discord API wrapper
