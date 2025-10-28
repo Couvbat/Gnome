@@ -1,6 +1,6 @@
 # Gnome Discord Bot
 
-Un bot Discord avec intégration Mistral AI et fonctionnalités vocales.
+Un bot Discord avec intégration Mistral AI et fonctionnalités vocales, écrit en TypeScript.
 
 ## Installation
 
@@ -31,14 +31,26 @@ Un bot Discord avec intégration Mistral AI et fonctionnalités vocales.
    OPENAI_API_KEY=your_openai_api_key
    ```
 
-4. **Déployer les commandes**
+4. **Compiler le projet**
    ```bash
-   node deploy-commands.js
+   npm run build
    ```
 
-5. **Lancer le bot**
+5. **Déployer les commandes**
    ```bash
-   node index.js
+   npm run deploy
+   ```
+
+6. **Lancer le bot**
+   
+   **Mode développement** (avec rechargement automatique):
+   ```bash
+   npm run dev
+   ```
+   
+   **Mode production**:
+   ```bash
+   npm start
    ```
 
 ## Commandes
@@ -77,23 +89,28 @@ Un bot Discord avec intégration Mistral AI et fonctionnalités vocales.
 
 ```
 gnome/
-├── commands/              # Commandes slash (structure plate)
-│   ├── conversation.js    # Conversation multi-tours avec Mistral
-│   ├── echo.js           # Commande de test echo
-│   ├── listen.js         # Écoute vocale avec transcription
-│   ├── mistral.js        # Question simple à Mistral
-│   ├── ping.js           # Test de latence
-│   ├── server.js         # Infos serveur
-│   ├── template          # Template pour nouvelles commandes
-│   └── user.js           # Infos utilisateur
+├── commands/              # Commandes slash (TypeScript)
+│   ├── conversation.ts    # Conversation multi-tours avec Mistral
+│   ├── echo.ts           # Commande de test echo
+│   ├── listen.ts         # Écoute vocale avec transcription
+│   ├── mistral.ts        # Question simple à Mistral
+│   ├── ping.ts           # Test de latence
+│   ├── server.ts         # Infos serveur
+│   ├── template.ts       # Template pour nouvelles commandes
+│   └── user.ts           # Infos utilisateur
+├── types/                # Définitions de types TypeScript
+│   └── command.ts        # Interface Command partagée
+├── dist/                 # Fichiers JavaScript compilés (gitignored)
 ├── temp/                 # Fichiers audio temporaires (créé automatiquement)
+├── __tests__/            # Tests unitaires
 ├── .github/
 │   └── copilot-instructions.md  # Guide pour les agents IA
 ├── .env                  # Configuration (gitignored)
 ├── .env.example          # Template de configuration
 ├── .gitignore            # Fichiers à ignorer par Git
-├── index.js              # Point d'entrée du bot
-├── deploy-commands.js    # Script de déploiement des commandes
+├── index.ts              # Point d'entrée du bot (TypeScript)
+├── deploy-commands.ts    # Script de déploiement des commandes (TypeScript)
+├── tsconfig.json         # Configuration TypeScript
 ├── package.json          # Dépendances et métadonnées
 └── README.md             # Ce fichier
 ```
@@ -159,6 +176,19 @@ Configurés automatiquement dans `index.js` :
 - `@types/node@24.9.1` : Types TypeScript pour Node.js (pour de meilleurs suggestions dans l'éditeur)
 
 ## Développement
+
+### TypeScript
+
+Le projet utilise TypeScript pour une meilleure sécurité des types et une expérience de développement améliorée.
+
+**Créer une nouvelle commande:**
+```bash
+cp commands/template.ts commands/macommande.ts
+# Éditez le fichier, puis:
+npm run deploy
+```
+
+Voir `commands/template.ts` pour la structure de base d'une commande.
 
 ### Conventions et Patterns
 Voir `.github/copilot-instructions.md` pour les conventions et patterns du projet.

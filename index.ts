@@ -1,7 +1,18 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
-require('dotenv').config();
+import fs from "node:fs";
+import path from "node:path";
+import { Client, Collection, Events, GatewayIntentBits } from "discord.js";
+import dotenv from "dotenv";
+import { Command } from "./types/command";
+
+dotenv.config();
+
+// Extend Client to include custom properties
+declare module "discord.js" {
+  export interface Client {
+    commands: Collection<string, Command>;
+    cooldowns: Collection<string, Collection<string, number>>;
+  }
+}
 
 const client = new Client({ 
   intents: [
@@ -12,16 +23,20 @@ const client = new Client({
 
 client.cooldowns = new Collection();
 client.commands = new Collection();
+
 const commandsPath = path.join(__dirname, "commands");
 const commandFiles = fs
   .readdirSync(commandsPath)
-  .filter((file) => file.endsWith(".js"));
+  .filter((file) => file.endsWith(".js") || file.endsWith(".ts"));
 
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
-  const command = require(filePath);
-  if ("data" in command && "execute" in command) {
-    client.commands.set(command.data.name, command);
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const command = require(filePath) as Command | { default: Command };
+  const cmd = "default" in command ? command.default : command;
+  
+  if ("data" in cmd && "execute" in cmd) {
+    client.commands.set(cmd.data.name, cmd);
   } else {
     console.log(
       `[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`
@@ -33,8 +48,9 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
 });
 
-client.on(Events.InteractionCreate, async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction): Promise<void> => {
   if (!interaction.isChatInputCommand()) return;
+  
   const command = client.commands.get(interaction.commandName);
 
   if (!command) {
@@ -49,19 +65,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   const now = Date.now();
-  const timestamps = cooldowns.get(command.data.name);
+  const timestamps = cooldowns.get(command.data.name)!;
   const defaultCooldownDuration = 3;
   const cooldownAmount = (command.cooldown ?? defaultCooldownDuration) * 1000;
 
   if (timestamps.has(interaction.user.id)) {
-    const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
+    const expirationTime = timestamps.get(interaction.user.id)! + cooldownAmount;
 
     if (now < expirationTime) {
       const expiredTimestamp = Math.round(expirationTime / 1000);
-      return interaction.reply({
+      await interaction.reply({
         content: `Please wait, you are on a cooldown for \`${command.data.name}\`. You can use it again <t:${expiredTimestamp}:t>.`,
         ephemeral: true,
       });
+      return;
     }
   }
 
@@ -78,10 +95,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (error) {
     console.error(error);
-    await interaction.editReply({
-      content: "There was an error while executing this command!",
-      ephemeral: true,
-    });
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({
+        content: "There was an error while executing this command!",
+      });
+    } else {
+      await interaction.reply({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    }
   }
 });
 

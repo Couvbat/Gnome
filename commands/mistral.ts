@@ -1,18 +1,34 @@
-const { SlashCommandBuilder } = require("discord.js");
-const { request } = require("undici");
+import { SlashCommandBuilder, CommandInteraction } from "discord.js";
+import { request } from "undici";
+import { Command } from "../types/command";
 
-module.exports = {
-  cooldown: "5", // seconds
+interface MistralMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface MistralResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+}
+
+export const command: Command = {
   data: new SlashCommandBuilder()
     .setName("mistral")
     .setDescription("Posez une question à Mistral.")
     .addStringOption((option) =>
       option.setName("prompt").setDescription("Prompt").setRequired(true)
     ),
-  async execute(interaction) {
-    await interaction.deferReply(); // Defer the reply here
 
-    const prompt = interaction.options.getString("prompt");
+  async execute(interaction: CommandInteraction): Promise<void> {
+    if (!interaction.isChatInputCommand()) return;
+
+    await interaction.deferReply();
+
+    const prompt = interaction.options.getString("prompt", true);
     const user = interaction.user.username;
 
     try {
@@ -21,7 +37,7 @@ module.exports = {
         {
           method: "POST",
           headers: {
-            'Content-Type': "application/json",
+            "Content-Type": "application/json",
             Authorization: "Bearer " + process.env.MISTRAL_API_KEY,
           },
           body: JSON.stringify({
@@ -34,9 +50,9 @@ module.exports = {
               },
               {
                 role: "user",
-                content: `${prompt}`,
+                content: prompt,
               },
-            ],
+            ] as MistralMessage[],
             temperature: 0.7,
             top_p: 1,
             max_tokens: 1800,
@@ -45,7 +61,7 @@ module.exports = {
       );
 
       // Parse the response body as JSON
-      const body = await apiRequest.body.json();
+      const body = (await apiRequest.body.json()) as MistralResponse;
 
       // Extract the reply from the response body
       const reply = body.choices[0].message.content;
@@ -57,10 +73,19 @@ module.exports = {
       // Edit the deferred reply with the bot's response
       await interaction.editReply({ content: formatedPrompt + formatedReply });
     } catch (error) {
-      console.error('Error occurred while making the Mistral API request:', error);
-      await interaction.editReply({ content: 'An error occurred while processing your request. Please try again later.' });
+      console.error(
+        "Error occurred while making the Mistral API request:",
+        error
+      );
+      await interaction.editReply({
+        content:
+          "An error occurred while processing your request. Please try again later.",
+      });
     }
   },
+
+  cooldown: 5,
 };
 
-
+// For backward compatibility with CommonJS
+module.exports = command;

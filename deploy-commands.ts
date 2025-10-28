@@ -1,23 +1,41 @@
-const { REST, Routes } = require("discord.js");
-require('dotenv').config();
-const fs = require("node:fs");
-const path = require("node:path");
+import { REST, Routes } from "discord.js";
+import dotenv from "dotenv";
+import fs from "node:fs";
+import path from "node:path";
+
+dotenv.config();
 
 const { DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID } = process.env;
 
-const commands = [];
+if (!DISCORD_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) {
+  throw new Error("Missing required environment variables: DISCORD_TOKEN, DISCORD_CLIENT_ID, or DISCORD_GUILD_ID");
+}
+
+interface Command {
+  data: {
+    name: string;
+    toJSON: () => unknown;
+  };
+  execute: (interaction: unknown) => Promise<void>;
+}
+
+const commands: unknown[] = [];
+
 // Grab all the command files from the commands directory
 const commandsPath = path.join(__dirname, "commands");
 const commandFiles = fs
   .readdirSync(commandsPath)
-  .filter((file) => file.endsWith(".js"));
+  .filter((file) => file.endsWith(".js") || file.endsWith(".ts"));
 
 // Grab the SlashCommandBuilder#toJSON() output of each command's data for deployment
 for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
-  const command = require(filePath);
-  if ("data" in command && "execute" in command) {
-    commands.push(command.data.toJSON());
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const command = require(filePath) as Command | { default: Command };
+  const cmd = "default" in command ? command.default : command;
+  
+  if ("data" in cmd && "execute" in cmd) {
+    commands.push(cmd.data.toJSON());
   } else {
     console.log(
       `[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`
@@ -39,7 +57,7 @@ const rest = new REST().setToken(DISCORD_TOKEN);
     const data = await rest.put(
       Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID),
       { body: commands }
-    );
+    ) as unknown[];
 
     console.log(
       `Successfully reloaded ${data.length} application (/) commands.`

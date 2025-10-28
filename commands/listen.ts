@@ -1,18 +1,30 @@
-const { SlashCommandBuilder } = require("discord.js");
-const {
+import { SlashCommandBuilder, CommandInteraction, GuildMember, TextChannel } from "discord.js";
+import {
   joinVoiceChannel,
   EndBehaviorType,
   VoiceConnectionStatus,
-} = require("@discordjs/voice");
-const { request } = require("undici");
-const fs = require("node:fs");
-const path = require("node:path");
+  VoiceConnection,
+  VoiceReceiver,
+} from "@discordjs/voice";
+import { request } from "undici";
+import fs from "node:fs";
+import path from "node:path";
+import { Command } from "../types/command";
+
+interface ConnectionData {
+  connection: VoiceConnection;
+  receiver: VoiceReceiver;
+  channel: TextChannel;
+}
+
+interface WhisperResponse {
+  text?: string;
+}
 
 // Store active voice connections
-const activeConnections = new Map();
+const activeConnections = new Map<string, ConnectionData>();
 
-module.exports = {
-  cooldown: "10", // 10 seconds cooldown
+export const command: Command = {
   data: new SlashCommandBuilder()
     .setName("listen")
     .setDescription(
@@ -29,30 +41,44 @@ module.exports = {
         )
     ),
 
-  async execute(interaction) {
+  async execute(interaction: CommandInteraction): Promise<void> {
+    if (!interaction.isChatInputCommand()) return;
+
     await interaction.deferReply();
 
-    const action = interaction.options.getString("action");
+    const action = interaction.options.getString("action", true);
     const guildId = interaction.guildId;
 
+    if (!guildId) {
+      await interaction.editReply({
+        content: "Cette commande doit être utilisée dans un serveur.",
+      });
+      return;
+    }
+
     if (action === "stop") {
-      return await stopListening(interaction, guildId);
+      await stopListening(interaction, guildId);
+      return;
     }
 
     // Check if user is in a voice channel
-    const voiceChannel = interaction.member?.voice?.channel;
+    const member = interaction.member as GuildMember | null;
+    const voiceChannel = member?.voice?.channel;
+
     if (!voiceChannel) {
-      return await interaction.editReply({
+      await interaction.editReply({
         content:
           "Tu dois être dans un salon vocal pour que je puisse t'écouter !",
       });
+      return;
     }
 
     // Check if already listening in this guild
     if (activeConnections.has(guildId)) {
-      return await interaction.editReply({
+      await interaction.editReply({
         content: "Je suis déjà en train d'écouter dans ce serveur !",
       });
+      return;
     }
 
     try {
@@ -60,7 +86,7 @@ module.exports = {
       const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: guildId,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+        adapterCreator: voiceChannel.guild.voiceAdapterCreator as any,
         selfDeaf: false, // CRITICAL: Must be false to receive audio
         selfMute: false,
       });
@@ -77,7 +103,7 @@ module.exports = {
         activeConnections.delete(guildId);
       });
 
-      connection.on("error", (error) => {
+      connection.on("error", (error: Error) => {
         console.error(`Voice connection error in guild ${guildId}:`, error);
         activeConnections.delete(guildId);
       });
@@ -86,14 +112,16 @@ module.exports = {
       const receiver = connection.receiver;
 
       // Store connection info
-      activeConnections.set(guildId, {
-        connection,
-        receiver,
-        channel: interaction.channel,
-      });
+      if (interaction.channel && "send" in interaction.channel) {
+        activeConnections.set(guildId, {
+          connection,
+          receiver,
+          channel: interaction.channel as TextChannel,
+        });
+      }
 
       // Listen to speaking events
-      receiver.speaking.on("start", async (userId) => {
+      receiver.speaking.on("start", async (userId: string) => {
         console.log(`User ${userId} started speaking`);
 
         // Subscribe to their audio stream
@@ -105,8 +133,8 @@ module.exports = {
         });
 
         // Collect audio chunks
-        const audioChunks = [];
-        audioStream.on("data", (chunk) => {
+        const audioChunks: Buffer[] = [];
+        audioStream.on("data", (chunk: Buffer) => {
           audioChunks.push(chunk);
         });
 
@@ -126,7 +154,7 @@ module.exports = {
             console.log(`Processing audio from ${user.username}`);
 
             // Combine all audio chunks into a single buffer
-            const audioBuffer = Buffer.concat(audioChunks);
+            const audioBuffer = Buffer.concat(audioChunks as any);
 
             // Save temporarily (Opus format)
             const tempDir = path.join(__dirname, "../../temp");
@@ -163,12 +191,12 @@ module.exports = {
           }
         });
 
-        audioStream.on("error", (error) => {
+        audioStream.on("error", (error: Error) => {
           console.error(`Audio stream error for user ${userId}:`, error);
         });
       });
 
-      receiver.speaking.on("end", (userId) => {
+      receiver.speaking.on("end", (userId: string) => {
         console.log(`User ${userId} stopped speaking (speaking event)`);
       });
 
@@ -187,15 +215,21 @@ module.exports = {
       });
     }
   },
+
+  cooldown: 10,
 };
 
-async function stopListening(interaction, guildId) {
+async function stopListening(
+  interaction: CommandInteraction,
+  guildId: string
+): Promise<void> {
   const connectionData = activeConnections.get(guildId);
 
   if (!connectionData) {
-    return await interaction.editReply({
+    await interaction.editReply({
       content: "Je ne suis pas en train d'écouter dans ce serveur.",
     });
+    return;
   }
 
   try {
@@ -213,7 +247,7 @@ async function stopListening(interaction, guildId) {
   }
 }
 
-async function transcribeAudio(audioFilePath) {
+async function transcribeAudio(audioFilePath: string): Promise<string | null> {
   if (!process.env.OPENAI_API_KEY) {
     console.error("OpenAI API key not configured");
     return null;
@@ -227,7 +261,7 @@ async function transcribeAudio(audioFilePath) {
     const formData = new FormData();
     formData.append(
       "file",
-      new Blob([audioFile], { type: "audio/opus" }),
+      new Blob([audioFile as any], { type: "audio/opus" }),
       "audio.opus"
     );
     formData.append("model", "whisper-1");
@@ -240,14 +274,17 @@ async function transcribeAudio(audioFilePath) {
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
-        body: formData,
+        body: formData as any,
       }
     );
 
-    const data = await response.body.json();
+    const data = (await response.body.json()) as WhisperResponse;
     return data.text || null;
   } catch (error) {
     console.error("Error transcribing audio with Whisper:", error);
     return null;
   }
 }
+
+// For backward compatibility with CommonJS
+module.exports = command;

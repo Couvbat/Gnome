@@ -1,20 +1,61 @@
 # Gnome Discord Bot - AI Agent Instructions
 
 ## Project Overview
-A Discord.js v14 bot named "Le Gnome" that integrates with Mistral AI for conversational AI features in "La zone" Discord server. Now includes voice channel listening capabilities with speech-to-text integration.
+A Discord.js v14 bot named "Le Gnome" that integrates with Mistral AI for conversational AI features in "La zone" Discord server. Includes voice channel listening capabilities with speech-to-text integration. Written in TypeScript.
 
 ## Architecture
 
+### Language & Runtime
+- **Language:** TypeScript (migrating from JavaScript)
+- **Runtime:** Node.js v22.17.0
+- **Package Manager:** npm
+- **TypeScript Config:** `tsconfig.json` with strict mode enabled
+
 ### Bot Entry Point
-- `index.js`: Main bot initialization with command loading, cooldown system, and interaction handling
-- `deploy-commands.js`: Standalone script to register slash commands with Discord API
+- `index.ts` (formerly `index.js`): Main bot initialization with command loading, cooldown system, and interaction handling
+- `deploy-commands.ts` (formerly `deploy-commands.js`): Standalone script to register slash commands with Discord API
+- **Build output:** `dist/` directory (gitignored)
 
 ### Command Structure
-Commands live directly in `commands/` folder (flat structure, not nested). Each command exports:
+Commands live directly in `commands/` folder (flat structure, not nested). Each command exports a typed object:
 - `data`: SlashCommandBuilder instance defining command metadata
-- `execute`: Async function handling command logic
-- `cooldown` (optional): String representing seconds (e.g., `"5"`)
+- `execute`: Async function with typed `CommandInteraction` parameter
+- `cooldown` (optional): Number representing seconds (e.g., `5`)
 - `defer` (optional): Boolean to trigger deferred replies with automatic "Done!" response
+
+**All commands are now in TypeScript:**
+- `commands/ping.ts` - Simple ping/pong test
+- `commands/echo.ts` - Echoes user input
+- `commands/user.ts` - Displays user information
+- `commands/server.ts` - Displays server information
+- `commands/mistral.ts` - Single-shot Mistral AI interaction
+- `commands/conversation.ts` - Thread-based Mistral AI conversation
+- `commands/listen.ts` - Voice channel transcription with OpenAI Whisper
+- `commands/template.ts` - TypeScript template for new commands
+
+**TypeScript Example:**
+```typescript
+import { SlashCommandBuilder, CommandInteraction } from 'discord.js';
+
+interface Command {
+  data: SlashCommandBuilder;
+  execute: (interaction: CommandInteraction) => Promise<void>;
+  cooldown?: number;
+  defer?: boolean;
+}
+
+export const command: Command = {
+  data: new SlashCommandBuilder()
+    .setName('example')
+    .setDescription('Example command'),
+  
+  async execute(interaction: CommandInteraction): Promise<void> {
+    await interaction.reply('Example response');
+  },
+  
+  cooldown: 5
+};
+```
 
 ### Configuration
 Environment variables in `.env` (gitignored):
@@ -32,26 +73,27 @@ Use `.env.example` as template.
 
 ### Command Template
 Use `commands/template` as boilerplate for new commands. All commands must:
-1. Import `SlashCommandBuilder` from `discord.js`
-2. Export object with `data` and `execute` properties
-3. Use async/await for `execute` function
+1. Import types and `SlashCommandBuilder` from `discord.js`
+2. Define proper TypeScript interfaces
+3. Export typed object with `data` and `execute` properties
+4. Use async/await with typed `CommandInteraction` parameter
 
 ### Deferred Replies
-For long-running operations (API calls), check `mistral.js` pattern:
+For long-running operations (API calls), check `mistral.ts` pattern:
 - Call `await interaction.deferReply()` immediately
 - Process the operation
 - Use `await interaction.editReply()` to send response
 - If command has `defer: true` property, main handler adds automatic "Done!" message
 
 ### Cooldown System
-- Managed centrally in `index.js` via `client.cooldowns` Collection
+- Managed centrally in `index.ts` via `client.cooldowns` Collection
 - Default 3s cooldown, overrideable per-command via `cooldown` property
 - Ephemeral cooldown messages show Discord timestamp format: `<t:${timestamp}:t>`
 
 ### Mistral AI Integration
 Two conversation modes implemented:
-1. **Single-shot** (`mistral.js`): One prompt/response
-2. **Thread conversation** (`conversation.js`): 15-minute thread with message collector that fetches conversation history before each API call
+1. **Single-shot** (`mistral.ts`): One prompt/response
+2. **Thread conversation** (`conversation.ts`): 15-minute thread with message collector that fetches conversation history before each API call
 
 Both use identical system prompt defining bot personality as "Le Gnome" - a friendly but sarcastic bot focused on gaming, web dev, and generative AI topics.
 
@@ -72,10 +114,10 @@ Voice receiving capabilities using `@discordjs/voice`:
 
 ### Adding Commands
 1. Create file in `commands/` following template structure (flat directory, not nested)
-2. Write unit tests in `__tests__/<command-name>.test.js` using Jest
+2. Write unit tests in `__tests__/<command-name>.test.ts` using Jest
 3. Run `npm test` to verify tests pass
-4. Run `node deploy-commands.js` to register with Discord
-5. Restart bot (`node index.js`) to load command handler
+4. Run `npm run deploy` to register with Discord (compiles TypeScript and deploys)
+5. Restart bot (`npm run dev` for development or `npm start` for production) to load command handler
 
 ### Testing
 Project uses **Jest** for unit testing. See `TESTING.md` for comprehensive guide.
@@ -137,6 +179,9 @@ request.mockResolvedValue({ body: { json: () => ({...}) } });
 - Commands described in French but code comments/logs in English
 - Error handling logs to console, sends generic error messages to users
 - Environment variables via `.env` file (use `process.env.VARIABLE_NAME`)
-- Command cooldowns stored as string seconds, not numbers
+- Command cooldowns stored as numbers in TypeScript (e.g., `5` not `"5"`)
 - Conversation history rebuilt from Discord thread messages on each Mistral call (not cached)
 - Voice audio stored temporarily in `temp/` directory, deleted after transcription
+- Use TypeScript strict mode for maximum type safety
+- Prefer explicit types over `any`
+- Use interfaces for complex objects
