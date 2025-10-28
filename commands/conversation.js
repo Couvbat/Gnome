@@ -1,7 +1,6 @@
 // Import required modules
 const { SlashCommandBuilder, MessageCollector } = require("discord.js");
 const { request } = require("undici");
-const { mistralApiKey } = require("../../config.json");
 
 // Define and export the slash command
 module.exports = {
@@ -66,7 +65,7 @@ async function handleMessage(m, threadChannel, user) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer " + mistralApiKey,
+        Authorization: "Bearer " + process.env.MISTRAL_API_KEY,
       },
       body: JSON.stringify({
         model: "mistral-small-latest",

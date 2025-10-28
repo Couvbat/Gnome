@@ -1,6 +1,5 @@
 const { SlashCommandBuilder } = require("discord.js");
 const { request } = require("undici");
-const { mistralApiKey } = require("../../config.json");
 
 module.exports = {
   cooldown: "5", // seconds
@@ -23,7 +22,7 @@ module.exports = {
           method: "POST",
           headers: {
             'Content-Type': "application/json",
-            Authorization: "Bearer " + mistralApiKey,
+            Authorization: "Bearer " + process.env.MISTRAL_API_KEY,
           },
           body: JSON.stringify({
             model: "mistral-small-latest",
