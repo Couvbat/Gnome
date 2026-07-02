@@ -147,7 +147,7 @@ All four games connect to the backend's REST API for solo actions and Socket.io 
 
 ## Testing
 
-Four Vitest test files under `src/__tests__/`, using `@vue/test-utils` and jsdom: `api.test.ts`, `cardUtils.test.ts`, `discordSdk.test.ts`, `websocket.test.ts`.
+13 Vitest test files under `src/__tests__/`, using `@vue/test-utils` and jsdom: the service layer (`api`, `cardUtils`, `discordSdk`, `websocket`), the composables (`useEnergy`, `useDiscordSdk`), and the logic-heavy components under `components/` (`App`, `CharacterCreation`, `CasinoLobby`, and the four casino games). See [docs/TESTING.md](../docs/TESTING.md) for the full breakdown and known gaps.
 
 ## Troubleshooting
 

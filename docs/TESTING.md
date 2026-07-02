@@ -6,9 +6,9 @@ All three packages use **Vitest**. Tests mock Discord interactions, external API
 
 | Package | Test files | Framework |
 |---|---|---|
-| `bot/` | 28, in `bot/__tests__/` | Vitest |
-| `backend/` | 21 (15 unit + 6 e2e), in `backend/__tests__/` | Vitest + `supertest` |
-| `frontend/` | 4, in `frontend/src/__tests__/` | Vitest + `@vue/test-utils` |
+| `bot/` | 30, in `bot/__tests__/` | Vitest |
+| `backend/` | 23 (16 unit + 7 e2e), in `backend/__tests__/` | Vitest + `supertest` + `socket.io-client` |
+| `frontend/` | 13, in `frontend/src/__tests__/` | Vitest + `@vue/test-utils` |
 
 ## Running tests
 
@@ -64,6 +64,7 @@ __tests__/
 ├── CharacterService.test.ts       # RPG services
 ├── AbilityService.test.ts
 ├── EnergyService.test.ts
+├── EconomyService.test.ts
 ├── ReputationService.test.ts
 ├── QuestService.test.ts
 ├── BardAbilities.test.ts
@@ -74,12 +75,34 @@ __tests__/
 ├── casino-rpg-workflow.e2e.test.ts
 ├── games-routes.e2e.test.ts
 ├── progression-routes.e2e.test.ts
-└── quests-routes.e2e.test.ts
+├── quests-routes.e2e.test.ts
+└── socketHandlers.e2e.test.ts     # e2e (live Socket.IO server + socket.io-client)
 ```
 
 ### Frontend (`frontend/src/__tests__/`)
 
-`api.test.ts`, `cardUtils.test.ts`, `discordSdk.test.ts`, `websocket.test.ts`.
+```text
+src/__tests__/
+├── setup.ts                     # registers the PrimeVue plugin globally for @vue/test-utils' mount()
+├── api.test.ts                  # service layer
+├── cardUtils.test.ts
+├── discordSdk.test.ts
+├── websocket.test.ts
+├── useEnergy.test.ts             # composables (mount a minimal host component; rely on onMounted/onUnmounted)
+├── useDiscordSdk.test.ts
+└── components/
+    ├── App.test.ts                # top-level auth/routing flow
+    ├── CharacterCreation.test.ts   # validation + creation flow
+    ├── CasinoLobby.test.ts         # view routing, table join/create logic (shallowMount)
+    ├── SlotMachine.test.ts         # spin animation + backend call
+    ├── DiceGame.test.ts            # prediction selection + roll
+    ├── BlackjackTable.test.ts      # WebSocket-driven multiplayer state
+    └── RouletteWheel.test.ts       # WebSocket-driven multiplayer state
+```
+
+Component tests that talk to `wsService` mock the whole `services/websocket` module with a lightweight listener registry (`on`/`off`/`__trigger`) so tests can simulate server-pushed events without a real socket connection — see `BlackjackTable.test.ts` for the pattern.
+
+Presentational atoms/molecules/organisms (`Button.vue`, `Card.vue`, `GamesGrid.vue`, the blackjack subcomponents, etc.) have no dedicated tests — see [Testing gaps](#testing-gaps).
 
 ## Writing tests
 
@@ -166,6 +189,19 @@ E2E suites use `supertest` against the Express app and mock Mongoose models with
 1. Create the test file (`bot/__tests__/<command>.test.ts` or `backend/__tests__/<name>.test.ts`), using a similar existing test as a template.
 2. Cover: structure validation, successful execution, error handling, edge cases.
 3. Run `npm test` and `npm run test:coverage` before committing.
+
+## Testing gaps
+
+Known coverage gaps:
+
+- **Frontend presentational components** — the atoms/molecules/organisms (`Button.vue`, `Card.vue`, `Badge.vue`, `GamesGrid.vue`, the blackjack subcomponents `PlayerSeat`/`DealerSection`/`BettingControls`/`GameControls`, etc.) have no dedicated tests. These are largely prop-to-template rendering with little branching logic; they're exercised indirectly through the game-component tests (e.g. `BlackjackTable.test.ts` asserts on `PlayerSeat`/`DealerSection` props) rather than tested in isolation. Deliberately out of scope — low defect-catching value relative to the effort of testing ~20 more trivial files.
+- **Dead backend schemas** — `Guild`, `GuildMember`, `Item`, `UserInventory`, `CasinoEvent`, `CasinoAnalytics`, `NPCState` in `backend/src/models/schemas.ts` have no route or service consuming them yet, so there's nothing to test until they're wired up.
+
+### Not covered by design
+
+- MongoDB is always mocked — no test exercises a real database, so index behavior, real query performance, and Mongo-specific edge cases aren't verified.
+- Bot voice/audio streaming (`@discordjs/voice`) is mocked at the boundary; no test plays real audio.
+- Concurrent/race-condition behavior of atomic operations (`spendCoins`, `claimDaily`, table-manager locking) is asserted at the single-call level, not under real concurrent load.
 
 ## Continuous integration
 
