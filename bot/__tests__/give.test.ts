@@ -1,4 +1,4 @@
-import { describe, test, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { userLevelsDb } from '../database/db';
 import { command } from '../commands/give';
 
@@ -74,6 +74,8 @@ describe('/give command', () => {
     });
 
     test('should prevent giving more coins than the sender has', async () => {
+      // spendCoins is atomic: it returns false when the balance gate fails
+      userLevelsDb.spendCoins = vi.fn().mockResolvedValue(false);
       userLevelsDb.get = vi.fn().mockResolvedValue({
         userId: 'sender123',
         guildId: 'guild123',
@@ -93,12 +95,14 @@ describe('/give command', () => {
 
       await command.execute(mockInteraction);
 
+      expect(userLevelsDb.spendCoins).toHaveBeenCalledWith('sender123', 'guild123', 500);
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
           embeds: expect.arrayContaining([
             expect.objectContaining({
               data: expect.objectContaining({
                 title: '❌ Solde insuffisant',
+                description: expect.stringContaining('100'),
               }),
             }),
           ]),
@@ -110,14 +114,9 @@ describe('/give command', () => {
 
   describe('Successful Transfer Tests', () => {
     test('should successfully transfer coins between users', async () => {
+      userLevelsDb.spendCoins = vi.fn().mockResolvedValue(true);
+      userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
       userLevelsDb.get = vi.fn()
-        .mockResolvedValueOnce({
-          userId: 'sender123',
-          guildId: 'guild123',
-          coins: 500,
-          xp: 0,
-          level: 0,
-        })
         .mockResolvedValueOnce({
           userId: 'sender123',
           guildId: 'guild123',
@@ -133,8 +132,6 @@ describe('/give command', () => {
           level: 0,
         });
 
-      userLevelsDb.addCoins = vi.fn();
-
       const recipient = {
         id: 'recipient123',
         displayName: 'RecipientUser',
@@ -146,10 +143,10 @@ describe('/give command', () => {
 
       await command.execute(mockInteraction);
 
-      // Check that coins were deducted from sender
-      expect(userLevelsDb.addCoins).toHaveBeenCalledWith('sender123', 'guild123', -100);
-      
-      // Check that coins were added to recipient
+      // Coins are deducted atomically from the sender via spendCoins
+      expect(userLevelsDb.spendCoins).toHaveBeenCalledWith('sender123', 'guild123', 100);
+
+      // Coins are credited to the recipient via addCoins
       expect(userLevelsDb.addCoins).toHaveBeenCalledWith('recipient123', 'guild123', 100);
 
       // Check success message
@@ -167,14 +164,9 @@ describe('/give command', () => {
     });
 
     test('should handle transfer of minimum amount (1 coin)', async () => {
+      userLevelsDb.spendCoins = vi.fn().mockResolvedValue(true);
+      userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
       userLevelsDb.get = vi.fn()
-        .mockResolvedValueOnce({
-          userId: 'sender123',
-          guildId: 'guild123',
-          coins: 50,
-          xp: 0,
-          level: 0,
-        })
         .mockResolvedValueOnce({
           userId: 'sender123',
           guildId: 'guild123',
@@ -190,8 +182,6 @@ describe('/give command', () => {
           level: 0,
         });
 
-      userLevelsDb.addCoins = vi.fn();
-
       const recipient = {
         id: 'recipient123',
         displayName: 'RecipientUser',
@@ -203,7 +193,7 @@ describe('/give command', () => {
 
       await command.execute(mockInteraction);
 
-      expect(userLevelsDb.addCoins).toHaveBeenCalledWith('sender123', 'guild123', -1);
+      expect(userLevelsDb.spendCoins).toHaveBeenCalledWith('sender123', 'guild123', 1);
       expect(userLevelsDb.addCoins).toHaveBeenCalledWith('recipient123', 'guild123', 1);
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -219,14 +209,9 @@ describe('/give command', () => {
     });
 
     test('should handle transfer when sender has exactly the amount', async () => {
+      userLevelsDb.spendCoins = vi.fn().mockResolvedValue(true);
+      userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
       userLevelsDb.get = vi.fn()
-        .mockResolvedValueOnce({
-          userId: 'sender123',
-          guildId: 'guild123',
-          coins: 100,
-          xp: 0,
-          level: 0,
-        })
         .mockResolvedValueOnce({
           userId: 'sender123',
           guildId: 'guild123',
@@ -242,8 +227,6 @@ describe('/give command', () => {
           level: 0,
         });
 
-      userLevelsDb.addCoins = vi.fn();
-
       const recipient = {
         id: 'recipient123',
         displayName: 'RecipientUser',
@@ -255,7 +238,7 @@ describe('/give command', () => {
 
       await command.execute(mockInteraction);
 
-      expect(userLevelsDb.addCoins).toHaveBeenCalledWith('sender123', 'guild123', -100);
+      expect(userLevelsDb.spendCoins).toHaveBeenCalledWith('sender123', 'guild123', 100);
       expect(userLevelsDb.addCoins).toHaveBeenCalledWith('recipient123', 'guild123', 100);
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -272,16 +255,11 @@ describe('/give command', () => {
   });
 
   describe('Error Handling', () => {
-    test('should handle database errors gracefully', async () => {
-      userLevelsDb.get = vi.fn().mockResolvedValueOnce({
-        userId: 'sender123',
-        guildId: 'guild123',
-        coins: 500,
-        xp: 0,
-        level: 0,
-      });
-
-      userLevelsDb.addCoins = vi.fn().mockRejectedValueOnce(new Error('Database connection failed'));
+    test('should compensate the sender and report an error if crediting the recipient fails', async () => {
+      userLevelsDb.spendCoins = vi.fn().mockResolvedValue(true);
+      userLevelsDb.addCoins = vi.fn()
+        .mockRejectedValueOnce(new Error('Database connection failed')) // credit to recipient fails
+        .mockResolvedValueOnce(undefined); // compensating credit back to sender
 
       const recipient = {
         id: 'recipient123',
@@ -293,6 +271,10 @@ describe('/give command', () => {
       mockInteraction.options.getInteger.mockReturnValue(100);
 
       await command.execute(mockInteraction);
+
+      // First attempt credits the recipient, second call restores the sender
+      expect(userLevelsDb.addCoins).toHaveBeenNthCalledWith(1, 'recipient123', 'guild123', 100);
+      expect(userLevelsDb.addCoins).toHaveBeenNthCalledWith(2, 'sender123', 'guild123', 100);
 
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -310,6 +292,7 @@ describe('/give command', () => {
     });
 
     test('should handle sender with no existing user data (0 coins)', async () => {
+      userLevelsDb.spendCoins = vi.fn().mockResolvedValue(false);
       userLevelsDb.get = vi.fn().mockResolvedValue(null);
 
       const recipient = {
