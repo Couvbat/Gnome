@@ -40,7 +40,7 @@ Each package is set up independently. See the package READMEs for full instructi
 - [Backend setup](backend/README.md#getting-started)
 - [Frontend setup](frontend/README.md#getting-started)
 
-For production hosting (self-hosted TrueNAS LXC container + pm2), see [bot/README.md#deployment](bot/README.md#deployment).
+Production hosting is split: the bot runs self-hosted in a TrueNAS LXC container ([bot/README.md#deployment](bot/README.md#deployment)); the backend and frontend deploy to o2switch cPanel hosting ([backend/README.md#deployment](backend/README.md#deployment), [frontend/README.md#deployment](frontend/README.md#deployment)). MongoDB is self-hosted alongside the bot and shared by both.
 
 ### Prerequisites
 
