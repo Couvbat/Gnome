@@ -14,7 +14,13 @@ class WebSocketService {
       return;
     }
 
-    this.socket = io('http://localhost:3001', {
+    // Backend origin baked at build time via VITE_WS_URL. When unset, the
+    // socket targets the page origin, which both dev (Vite proxies
+    // /socket.io to :3001) and the Discord Activity proxy (a /socket.io URL
+    // mapping in the Developer Portal) resolve to the backend.
+    const wsUrl = (import.meta.env.VITE_WS_URL as string | undefined) || window.location.origin;
+
+    this.socket = io(wsUrl, {
       auth: { token: authToken },
       transports: ['websocket'],
     });

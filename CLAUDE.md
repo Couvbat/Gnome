@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Each package has its own `package.json`, `tsconfig.json`, `.env`, and `__tests__/` directory. There is no root-level build or test script — work inside the relevant package directory.
 
-Production hosting: only the bot is deployed, self-hosted in an Ubuntu LXC container on TrueNAS and run under pm2, with a self-hosted MongoDB on the same LAN (see `bot/README.md#deployment`). The backend/frontend casino packages are development-only for now.
+Production hosting: the bot is self-hosted in an Ubuntu LXC container on TrueNAS under pm2, with a self-hosted MongoDB on the same LAN (`bot/README.md#deployment`). The backend deploys to o2switch cPanel via Setup Node.js App/Passenger, and the frontend as static files on an o2switch subdomain, both reaching that same home MongoDB over the internet (`backend/README.md#deployment`, `frontend/README.md#deployment`).
 
 ## Commands
 
@@ -130,8 +130,8 @@ Frontend requires HTTPS for Discord Activity development — local certs in `fro
 Each package needs its own `.env` from `.env.example`. Key variables:
 
 - **bot**: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`, `MISTRAL_API_KEY`, `OPENAI_API_KEY`, `RIOT_GAMES_API_KEY`, `MONGODB_URI`
-- **backend**: `PORT`, `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, `CORS_ORIGIN`
-- **frontend**: `VITE_API_URL`, `VITE_WS_URL`, `VITE_DISCORD_CLIENT_ID`
+- **backend**: `PORT`, `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, `DISCORD_ACTIVITY_URL` (doubles as the CORS origin)
+- **frontend**: `VITE_DISCORD_CLIENT_ID`, `VITE_WS_URL` (optional; WebSocket defaults to the page origin)
 
 System prerequisites: Node.js 22.17.0+, MongoDB, FFmpeg (audio), YT-DLP (YouTube streaming), mkcert (frontend HTTPS).
 

@@ -45,6 +45,7 @@ MONGODB_URI=mongodb://localhost:27017/gnome-casino
 JWT_SECRET=jwt_secret
 
 DISCORD_CLIENT_ID=discord_client_id
+# Also used as the allowed CORS origin (REST and Socket.io)
 DISCORD_ACTIVITY_URL=http://localhost:3000
 
 DEFAULT_STARTING_COINS=1000
@@ -54,8 +55,6 @@ MAX_BET_AMOUNT=10000
 
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=100
-
-CORS_ORIGIN=http://localhost:3000
 ```
 
 ## Architecture
@@ -239,17 +238,51 @@ Character data lives in `Character` (class, stats, XP) and `CasinoProfile` (ener
 
 ## Deployment
 
+The backend deploys to **o2switch shared hosting** via cPanel's **Setup Node.js App** (CloudLinux Node.js selector + Phusion Passenger), on its own subdomain (e.g. `api.example.com`). MongoDB stays **self-hosted at home** on the same box as the [bot](../bot/README.md#deployment) — the backend reaches it over the internet.
+
+### cPanel application setup
+
+1. In cPanel, create the subdomain (e.g. `api.example.com`) and enable AutoSSL for it (SSL/TLS Status → Run AutoSSL). HTTPS is mandatory for Discord Activities.
+2. Over SSH, clone the repo into your home directory:
+   ```bash
+   git clone <repo-url> ~/gnome
+   ```
+3. In **Setup Node.js App**, create the application:
+   - **Node.js version** — the newest available (18 minimum)
+   - **Application root** — `gnome/backend`
+   - **Application URL** — the subdomain, mounted at `/`
+   - **Application startup file** — `dist/index.js`
+4. Copy the "enter to virtual environment" command shown at the top of the app's page, run it over SSH, then install and build:
+   ```bash
+   npm ci
+   npm run build
+   ```
+5. Add the environment variables in the app's UI: `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, and `DISCORD_ACTIVITY_URL` (this is also the allowed CORS origin — set it to the Activity's proxy origin, `https://<discord-app-id>.discordsays.com`). **Do not set `PORT`** — Passenger assigns it and the server already reads `process.env.PORT`.
+6. Click **Restart** in the app UI. Verify with `curl https://api.example.com/health`.
+
+### Reaching the home MongoDB
+
+The backend and the bot must share the same database, so `MONGODB_URI` points back to the self-hosted MongoDB. Exposing it requires care — never put an auth-less MongoDB on the internet:
+
+- Enable **authentication** on MongoDB and use a dedicated user in the connection string.
+- Forward a **non-default external port** on the router to the MongoDB host.
+- Restrict the forwarded port to the **o2switch server's IP** in the router/TrueNAS firewall.
+- Expect some added latency per game action (each play does several DB round-trips across the internet); if it becomes noticeable, the alternative is hosting the backend at home next to the bot and keeping only the static frontend on o2switch.
+
+### Socket.io behind Passenger
+
+o2switch fronts Node apps with LiteSpeed + Passenger, which supports WebSocket upgrades. The frontend pins `transports: ['websocket']` — if the upgrade is ever refused by the proxy, remove that option in `frontend/src/services/websocket.ts` so Socket.io can fall back to HTTP long-polling.
+
+### Updating
+
 ```bash
+cd ~/gnome && git pull
+cd backend
+npm ci
 npm run build
-export NODE_ENV=production
-export MONGODB_URI=...
-export JWT_SECRET=...
-npm start
 ```
 
-- HTTPS is required in front of the server for WebSocket security and Discord Activity compatibility.
-- `GET /health` is available for uptime checks.
-- CORS origin and rate limits are configured via environment variables (see Configuration).
+Then **Restart** the app from the cPanel UI (or `touch ~/gnome/backend/tmp/restart.txt`).
 
 ## Further reading
 
