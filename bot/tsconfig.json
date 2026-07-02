@@ -29,7 +29,8 @@
   ],
   "exclude": [
     "node_modules",
-    "bot/dist",
-    "bot/__tests__"
+    "dist",
+    "__tests__",
+    "vitest.config.ts"
   ]
 }
