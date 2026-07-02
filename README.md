@@ -40,6 +40,8 @@ Each package is set up independently. See the package READMEs for full instructi
 - [Backend setup](backend/README.md#getting-started)
 - [Frontend setup](frontend/README.md#getting-started)
 
+For production hosting (self-hosted TrueNAS LXC container + pm2), see [bot/README.md#deployment](bot/README.md#deployment).
+
 ### Prerequisites
 
 - Node.js 22.17.0+

@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Each package has its own `package.json`, `tsconfig.json`, `.env`, and `__tests__/` directory. There is no root-level build or test script — work inside the relevant package directory.
 
+Production hosting: only the bot is deployed, self-hosted in an Ubuntu LXC container on TrueNAS and run under pm2, with a self-hosted MongoDB on the same LAN (see `bot/README.md#deployment`). The backend/frontend casino packages are development-only for now.
+
 ## Commands
 
 ### Bot (`cd bot/`)
