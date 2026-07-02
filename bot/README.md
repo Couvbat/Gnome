@@ -150,7 +150,7 @@ bot/
 - Tracks per-command cooldowns in `client.cooldowns` (default 3s, overridable per command)
 - Tracks XP per message via `xpTracking.ts`
 - Registers `interactionCreate` (chat input + autocomplete) and `messageCreate` handlers
-- Runs a small HTTP server on `process.env.PORT` (default 3000) exposing `/` and `/health`, used for cPanel/Passenger process health checks
+- Runs a small HTTP server on `process.env.PORT` (default 3000) exposing `/` and `/health`, usable as an uptime/health check by the host
 - Handles graceful shutdown on `SIGTERM`/`SIGINT` and logs uncaught exceptions
 
 ### Command pattern
@@ -230,6 +230,62 @@ See [docs/TESTING.md](../docs/TESTING.md) for the full guide.
 | OpenAI Whisper | `/listen` transcription | `api.openai.com/v1/audio/transcriptions`, model `whisper-1` |
 | Riot Games | `/lol-*` commands | Platform `euw1`, match data via the `europe` regional endpoint |
 | OpenLibrary | `/book` | `openlibrary.org/search.json` |
+
+## Deployment
+
+The bot runs self-hosted in an **Ubuntu 24.04 (Noble) LXC container on TrueNAS**, managed by **pm2**, alongside a **self-hosted MongoDB** on the same network. The frontend/backend casino packages are not deployed — only the bot.
+
+### Container provisioning
+
+Create an Ubuntu Noble container from the TrueNAS Instances UI, then inside it:
+
+```bash
+# Node.js 22 (NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs git ffmpeg
+
+# yt-dlp (YouTube/SoundCloud streaming)
+curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+chmod +x /usr/local/bin/yt-dlp
+
+# pm2 process manager
+npm install -g pm2
+```
+
+### First deployment
+
+```bash
+git clone <repo-url> /opt/gnome
+cd /opt/gnome/bot
+npm ci
+cp .env.example .env    # fill in tokens; point MONGODB_URI at the MongoDB host
+npm run build
+npm run deploy           # register slash commands with Discord
+
+pm2 start dist/index.js --name gnome-bot --max-memory-restart 512M
+pm2 save                 # persist the process list
+pm2 startup              # generate the boot script, run the command it prints
+```
+
+Notes:
+
+- **`MONGODB_URI`** points at the self-hosted MongoDB over the LAN, e.g. `mongodb://192.168.x.x:27017/gnome`. Keep MongoDB bound to the local network only, and enable authentication if it's reachable by other machines.
+- **Timezone** — the birthday announcer cron fires at 9:00 AM *container-local* time. Set the container timezone (`timedatectl set-timezone Europe/Paris`) or export `TZ` in the pm2 environment so it doesn't fire on UTC.
+- **Health check** — the bot serves `GET /health` on `PORT` (default 3000), usable from TrueNAS or an uptime monitor to watch the process.
+
+### Updating
+
+```bash
+cd /opt/gnome
+git pull
+cd bot
+npm ci
+npm run build
+npm run deploy           # only needed when commands were added/changed
+pm2 restart gnome-bot
+```
+
+`pm2 logs gnome-bot` tails the bot's console output; `pm2 monit` shows memory/CPU (useful since the process is capped at 512 MB via `--max-memory-restart`).
 
 ## Troubleshooting
 
