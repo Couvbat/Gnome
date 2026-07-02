@@ -11,6 +11,15 @@ import { errorHandler } from '../src/middleware/errorHandler';
 import { CharacterService } from '../src/services/CharacterService';
 import { EconomyService } from '../src/services/EconomyService';
 
+// Helper to stub a `Character.find(...).sort().skip().limit()` chain
+function findChain(result: unknown) {
+  return {
+    sort: vi.fn().mockReturnThis(),
+    skip: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(result),
+  };
+}
+
 // Mock the database models
 vi.mock('../src/models/database');
 // Mock the CharacterService
@@ -222,6 +231,188 @@ describe('Character Creation API', () => {
       expect(response.body.classInfo).toBeDefined();
       expect(response.body.totalStats).toBeDefined();
       expect(response.body.levelProgress).toBeDefined();
+    });
+  });
+
+  describe('PUT /api/characters/level-up', () => {
+    it('grants XP and reports a level-up', async () => {
+      (CharacterService.levelUpCharacter as Mock).mockResolvedValue({
+        character: { _id: 'char-123', name: 'TestHero', level: 6 },
+        totalXp: 620,
+        leveledUp: true,
+        oldLevel: 5,
+        newLevel: 6,
+        xpGained: 120,
+      });
+
+      const response = await request(app)
+        .put('/api/characters/level-up')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ xp: 120 });
+
+      expect(response.status).toBe(200);
+      expect(CharacterService.levelUpCharacter).toHaveBeenCalledWith(testUserId, 'test-guild-456', 120);
+      expect(response.body).toMatchObject({
+        success: true,
+        leveledUp: true,
+        xpGained: 120,
+        character: { id: 'char-123', name: 'TestHero', level: 6, experience: 620 },
+      });
+      expect(response.body.message).toContain('leveled up from 5 to 6');
+    });
+
+    it('grants XP without a level-up message when the threshold is not reached', async () => {
+      (CharacterService.levelUpCharacter as Mock).mockResolvedValue({
+        character: { _id: 'char-123', name: 'TestHero', level: 5 },
+        totalXp: 520,
+        leveledUp: false,
+        xpGained: 20,
+      });
+
+      const response = await request(app)
+        .put('/api/characters/level-up')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ xp: 20 });
+
+      expect(response.status).toBe(200);
+      expect(response.body.leveledUp).toBe(false);
+      expect(response.body.message).toBe('Gained 20 XP');
+    });
+
+    it('rejects a non-positive XP amount', async () => {
+      const response = await request(app)
+        .put('/api/characters/level-up')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ xp: 0 });
+
+      expect(response.status).toBe(400);
+      expect(CharacterService.levelUpCharacter).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('DELETE /api/characters/me', () => {
+    it('deletes the current character', async () => {
+      (CharacterService.deleteCharacter as Mock).mockResolvedValue(undefined);
+
+      const response = await request(app)
+        .delete('/api/characters/me')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(CharacterService.deleteCharacter).toHaveBeenCalledWith(testUserId, 'test-guild-456');
+      expect(response.body).toEqual({ success: true, message: 'Character deleted successfully' });
+    });
+
+    it('propagates an error if deletion fails', async () => {
+      (CharacterService.deleteCharacter as Mock).mockRejectedValue(new Error('DB unavailable'));
+
+      const response = await request(app)
+        .delete('/api/characters/me')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(500);
+    });
+  });
+
+  describe('GET /api/characters/:characterId/stats', () => {
+    it('returns detailed stats for an existing character', async () => {
+      (Character.findOne as Mock).mockResolvedValue({
+        _id: 'char-123',
+        name: 'TestHero',
+        class: 'warrior',
+        level: 5,
+        xp: 500,
+        stats: { strength: 20, intelligence: 8, luck: 10, charisma: 12, vitality: 18, dexterity: 10 },
+        casinoBonus: { luckBonus: 5 },
+      });
+      (CharacterService.calculateTotalStats as Mock).mockReturnValue({ total: 78 });
+      (CharacterService.calculateLevelProgress as Mock).mockReturnValue({
+        currentLevel: 5,
+        currentXP: 500,
+        xpForNextLevel: 1000,
+        progress: 50,
+      });
+
+      const response = await request(app)
+        .get('/api/characters/char-123/stats')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(Character.findOne).toHaveBeenCalledWith({ _id: 'char-123', guildId: 'test-guild-456' });
+      expect(response.body.character).toMatchObject({ id: 'char-123', name: 'TestHero', className: 'warrior' });
+      expect(response.body.stats.total).toEqual({ total: 78 });
+      expect(response.body.classInfo.name).toBe('Warrior');
+      expect(response.body.levelProgress.progress).toBe(50);
+    });
+
+    it('returns 404 when the character does not exist', async () => {
+      (Character.findOne as Mock).mockResolvedValue(null);
+
+      const response = await request(app)
+        .get('/api/characters/does-not-exist/stats')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(404);
+    });
+  });
+
+  describe('GET /api/characters/leaderboard', () => {
+    it('returns a ranked, paginated leaderboard', async () => {
+      const characters = [
+        { _id: 'c1', name: 'Hero1', class: 'warrior', level: 10, xp: 5000 },
+        { _id: 'c2', name: 'Hero2', class: 'mage', level: 9, xp: 4500 },
+      ];
+      (Character.find as Mock).mockReturnValue(findChain(characters));
+      (Character.countDocuments as Mock).mockResolvedValue(2);
+      (CharacterService.calculateTotalStats as Mock).mockReturnValue({ total: 50 });
+
+      const response = await request(app)
+        .get('/api/characters/leaderboard')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.leaderboard).toHaveLength(2);
+      expect(response.body.leaderboard[0]).toMatchObject({ rank: 1, name: 'Hero1', class: 'Warrior' });
+      expect(response.body.leaderboard[1]).toMatchObject({ rank: 2, name: 'Hero2', class: 'Mage' });
+      expect(response.body.pagination).toEqual({ page: 1, limit: 10, total: 2, totalPages: 1 });
+    });
+
+    it('applies the page and limit query parameters', async () => {
+      (Character.find as Mock).mockReturnValue(findChain([]));
+      (Character.countDocuments as Mock).mockResolvedValue(25);
+
+      const response = await request(app)
+        .get('/api/characters/leaderboard?page=2&limit=5')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.pagination).toEqual({ page: 2, limit: 5, total: 25, totalPages: 5 });
+    });
+  });
+
+  describe('GET /api/characters/search', () => {
+    it('searches by name (case-insensitive)', async () => {
+      (Character.find as Mock).mockReturnValue({
+        limit: vi.fn().mockResolvedValue([
+          { _id: 'c1', name: 'Aragorn', class: 'warrior', level: 8, createdAt: new Date() },
+        ]),
+      });
+
+      const response = await request(app)
+        .get('/api/characters/search?name=arag')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.total).toBe(1);
+      expect(response.body.results[0]).toMatchObject({ name: 'Aragorn', class: 'Warrior' });
+    });
+
+    it('rejects a search with no name or className filter', async () => {
+      const response = await request(app)
+        .get('/api/characters/search')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(response.status).toBe(400);
     });
   });
 });

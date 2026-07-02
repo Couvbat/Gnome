@@ -67,6 +67,15 @@ This directory contains comprehensive end-to-end (E2E) tests for the Gnome Casin
    - Complete quest workflow (browse → start → progress → complete)
    - Quest abandonment workflow
 
+7. **`socketHandlers.e2e.test.ts`** - Real-time multiplayer transport tests
+   - Runs a live Socket.IO server + client pair (via `socket.io-client`) against `setupSocketHandlers`
+   - Auth handshake: missing token, invalid token, valid token
+   - Roulette: join table, table-state broadcast, betting-round auto-start, bet placement success/failure
+   - Blackjack: join table, hit/stand results, error propagation
+   - Bard `bard:trigger_lucky_song`: table-wide `bard:harmony_boost_active` broadcast, cooldown error path
+   - Disconnect: `casino:player_left` broadcast to the rest of the guild room
+   - `RouletteTableManager`, `BlackjackTableManager`, and `BardAbilities` are mocked — this suite tests the transport/routing layer, not game logic (which has its own unit tests)
+
 ## Running tests
 
 ### Run all E2E tests
@@ -239,7 +248,7 @@ it('should complete multi-step workflow', async () => {
 2. **`username` field** — a common source of test failures is a mocked `User` missing the `username` field; always include it.
 3. **Concurrent request testing** — race conditions are hard to test against mocks; a real database is needed for that.
 
-There is no WebSocket E2E coverage yet for the multiplayer table events (see [backend/README.md](../README.md#websocket-events) for the event list).
+`socketHandlers.e2e.test.ts` covers the WebSocket transport/routing layer with a live Socket.IO server, but the table managers it calls into are mocked — so it doesn't exercise real multiplayer game-state transitions end-to-end (that's covered separately by `BlackjackTableManager.test.ts` / `RouletteTableManager.test.ts`, also against mocked persistence).
 
 ## Debugging failed tests
 

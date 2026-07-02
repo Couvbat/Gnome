@@ -64,7 +64,8 @@ describe('EnergyService', () => {
 
     it('should apply warrior class energy bonus', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 80 });
-      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId });
+      // level: 1 isolates the class bonus from the +5/level energy bonus
+      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const result = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -87,7 +88,7 @@ describe('EnergyService', () => {
 
     it('should apply merchant class energy bonus', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 80 });
-      const mockCharacter = createMockCharacter('merchant', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('merchant', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const result = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -275,7 +276,7 @@ describe('EnergyService', () => {
 
     it('should apply class-specific energy bonuses when checking energy', async () => {
       const merchantProfile = createMockCasinoProfile({ energy: 100 });
-      const merchantCharacter = createMockCharacter('merchant', { userId: mockUserId, guildId: mockGuildId });
+      const merchantCharacter = createMockCharacter('merchant', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(merchantProfile, merchantCharacter);
 
       const merchantInfo = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -286,7 +287,7 @@ describe('EnergyService', () => {
 
     it('should handle energy at max capacity correctly', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 120 }); // Max for warrior
-      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const result = await EnergyService.restoreEnergy(mockUserId, mockGuildId, 50);
@@ -317,7 +318,7 @@ describe('EnergyService', () => {
         energy: 50, 
         lastEnergyRegen: now 
       });
-      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const result = await EnergyService.consumeEnergy(mockUserId, mockGuildId, 10);
@@ -331,7 +332,7 @@ describe('EnergyService', () => {
       
       // Test Paladin (highest energy bonus +30)
       const paladinProfile = createMockCasinoProfile({ energy: 100, lastEnergyRegen: now });
-      const paladinCharacter = createMockCharacter('paladin', { userId: mockUserId, guildId: mockGuildId });
+      const paladinCharacter = createMockCharacter('paladin', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(paladinProfile, paladinCharacter);
       
       const paladinInfo = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -449,7 +450,7 @@ describe('EnergyService', () => {
   describe('Edge Case: Class Energy Bonuses', () => {
     it('should give rogue lowest energy bonus (+10)', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 100 });
-      const mockCharacter = createMockCharacter('rogue', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('rogue', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const info = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -459,7 +460,7 @@ describe('EnergyService', () => {
 
     it('should give mage +15 energy bonus', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 100 });
-      const mockCharacter = createMockCharacter('mage', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('mage', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const info = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -469,7 +470,7 @@ describe('EnergyService', () => {
 
     it('should give bard +15 energy bonus', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 100 });
-      const mockCharacter = createMockCharacter('bard', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('bard', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const info = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -479,7 +480,7 @@ describe('EnergyService', () => {
 
     it('should give paladin highest energy bonus (+30)', async () => {
       const mockProfile = createMockCasinoProfile({ energy: 100 });
-      const mockCharacter = createMockCharacter('paladin', { userId: mockUserId, guildId: mockGuildId });
+      const mockCharacter = createMockCharacter('paladin', { userId: mockUserId, guildId: mockGuildId, level: 1 });
       setupMocks(mockProfile, mockCharacter);
 
       const info = await EnergyService.getEnergyInfo(mockUserId, mockGuildId);
@@ -489,14 +490,13 @@ describe('EnergyService', () => {
   });
 
   describe('Energy Cost Scaling', () => {
-    it('should apply bet scaling correctly: +1 cost per 50 coins', () => {
-      // Base bet: 50 coins
-      const cost50 = EnergyService.calculateEnergyCost('slots', 50);
+    it('should apply bet scaling correctly: +1 cost per 100 coins', () => {
       const cost100 = EnergyService.calculateEnergyCost('slots', 100);
-      const cost150 = EnergyService.calculateEnergyCost('slots', 150);
+      const cost200 = EnergyService.calculateEnergyCost('slots', 200);
+      const cost300 = EnergyService.calculateEnergyCost('slots', 300);
 
-      expect(cost100 - cost50).toBe(1);
-      expect(cost150 - cost100).toBe(1);
+      expect(cost200 - cost100).toBe(1);
+      expect(cost300 - cost200).toBe(1);
     });
 
     it('should have minimum cost equal to base cost for small bets', () => {
@@ -513,8 +513,8 @@ describe('EnergyService', () => {
     it('should calculate very high cost for large bets', () => {
       const cost5000 = EnergyService.calculateEnergyCost('blackjack', 5000);
 
-      // Base 2 + (5000/50) = 2 + 100 = 102
-      expect(cost5000).toBe(102);
+      // Base 2 + floor(5000/100) = 2 + 50 = 52
+      expect(cost5000).toBe(52);
     });
   });
 
