@@ -263,7 +263,9 @@ For testing without downloads:
 **Pros:** Instant, huge library, consistent style  
 **Cons:** Not pixel art (but works great for icons)
 
-## Asset manager utility
+## Asset manager utility (suggested pattern)
+
+No such utility exists in the codebase yet — this is a suggested shape for a helper that resolves asset paths/URLs by category, class, and rarity, for whenever assets are added.
 
 ### 🔧 Usage examples
 
@@ -340,43 +342,9 @@ Asset Name - Artist - License - Source URL
 health_potion_common.png - Kenney - CC0 - https://kenney.nl/assets/rpg-pack
 warrior_portrait.png - Artist Name - CC-BY 3.0 - https://opengameart.org/...
 -->
-
-🚧 Assets to add - See TODO section below
 ```
 
-## Tasks & priorities
-
-### 🔥 High priority (week 1)
-
-- [ ] **Character classes** (6 portraits + 6 avatars)
-  - [ ] Warrior male/female portraits (256x256)
-  - [ ] Mage male/female portraits (256x256)  
-  - [ ] Rogue, Merchant, Bard, Paladin portraits
-  - [ ] 6 corresponding Discord avatars (64x64)
-
-- [ ] **Basic equipment** (15-20 items)
-  - [ ] 5 main weapons (sword, staff, dagger, bow, hammer)
-  - [ ] 5 armor pieces (helmet, chestplate, gloves, boots, shield)
-  - [ ] 5 accessories (ring, amulet, cape, belt, pouch)
-
-### 🎯 Medium priority (week 2)
-
-- [ ] **Consumables & casino** (10-15 items)
-  - [ ] 5 potions (health, mana, luck, strength, speed)
-  - [ ] 5 casino items (luck coin, golden dice, lucky card)
-
-- [ ] **Casino Activity UI** (20-30 elements)
-  - [ ] Buttons (join, bet, quit)
-  - [ ] Tables (Blackjack, Roulette, slot machines)
-  - [ ] Cards and chips
-  - [ ] Visual effects (wins, jackpot, level-up)
-
-### 🔮 Low priority (week 3+)
-
-- [ ] **PvE monsters** (future combat system)
-- [ ] **Advanced animations** (sprite sheets)
-- [ ] **Themed backgrounds** (tavern, casino)
-- [ ] **Particles and effects** (magic, celebrations)
+Fill this in as assets are added, in this file or a dedicated `ATTRIBUTIONS.md`.
 
 ## Tips for managing assets
 
@@ -384,11 +352,11 @@ warrior_portrait.png - Artist Name - CC-BY 3.0 - https://opengameart.org/...
 
 Don't try to download everything at once:
 
-1. ✅ Get 5-10 weapon icons
-2. ✅ Get 5 potion icons
-3. ✅ Get 3-5 armor pieces
-4. ✅ Test in Discord bot
-5. ✅ Expand as needed
+1. Get 5-10 weapon icons
+2. Get 5 potion icons
+3. Get 3-5 armor pieces
+4. Test in Discord bot
+5. Expand as needed
 
 ## Important constraints
 
@@ -400,10 +368,4 @@ Don't try to download everything at once:
 
 ## Getting help
 
-Check these resources:
-- Asset manager utility code (when implemented)
-- Asset helper scripts (when implemented)
-- This documentation for all specifications
-
-**🎨 Ready to bring La Taverne Dorée to life!**  
-*From pixels to experience, every detail counts*
+This document covers directory layout, naming, and technical specs. For everything else, check the source of the asset pack you're using (Kenney, OpenGameArt, game-icons.net) for its specific license terms.
