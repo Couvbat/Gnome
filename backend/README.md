@@ -94,7 +94,7 @@ backend/
 | Database | MongoDB via Mongoose |
 | Auth | JWT (`jsonwebtoken`) |
 | Security | `helmet`, `cors`, `compression`, `rate-limiter-flexible` |
-| Testing | Vitest, `supertest` |
+| Testing | Vitest, `supertest` (REST), `socket.io-client` (WebSocket) |
 
 ## API reference
 

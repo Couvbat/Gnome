@@ -1,4 +1,4 @@
-import { describe, test, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { userLevelsDb } from '../database/db';
 import { command } from '../commands/daily';
 
@@ -31,18 +31,24 @@ describe('Daily Command', () => {
       lastDailyTimestamp: 0 // Never claimed before
     });
 
-    userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
-    userLevelsDb.upsert = vi.fn().mockResolvedValue(undefined);
+    // claimDaily is the atomic operation that actually grants the bonus
+    userLevelsDb.claimDaily = vi.fn().mockResolvedValue({
+      userId: 'testUser123',
+      guildId: 'testGuild123',
+      level: 5,
+      coins: 175, // 100 + 75
+      lastDailyTimestamp: 1609459200000
+    });
 
     await command.execute(mockInteraction);
 
     // Expected bonus: 50 (base) + (5 * 5) = 75 coins
-    expect(userLevelsDb.addCoins).toHaveBeenCalledWith('testUser123', 'testGuild123', 75);
-    expect(userLevelsDb.upsert).toHaveBeenCalledWith({
-      userId: 'testUser123',
-      guildId: 'testGuild123',
-      lastDailyTimestamp: 1609459200000
-    });
+    expect(userLevelsDb.claimDaily).toHaveBeenCalledWith(
+      'testUser123',
+      'testGuild123',
+      75,
+      24 * 60 * 60 * 1000
+    );
     expect(mockInteraction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         embeds: expect.arrayContaining([
@@ -66,13 +72,23 @@ describe('Daily Command', () => {
       lastDailyTimestamp: 0
     });
 
-    userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
-    userLevelsDb.upsert = vi.fn().mockResolvedValue(undefined);
+    userLevelsDb.claimDaily = vi.fn().mockResolvedValue({
+      userId: 'testUser123',
+      guildId: 'testGuild123',
+      level: 10,
+      coins: 300, // 200 + 100
+      lastDailyTimestamp: 1609459200000
+    });
 
     await command.execute(mockInteraction);
 
     // Expected bonus: 50 (base) + (10 * 5) = 100 coins
-    expect(userLevelsDb.addCoins).toHaveBeenCalledWith('testUser123', 'testGuild123', 100);
+    expect(userLevelsDb.claimDaily).toHaveBeenCalledWith(
+      'testUser123',
+      'testGuild123',
+      100,
+      24 * 60 * 60 * 1000
+    );
   });
 
   it('should reject claim if cooldown not expired', async () => {
@@ -86,9 +102,13 @@ describe('Daily Command', () => {
       lastDailyTimestamp: twentyThreeHoursAgo
     });
 
+    // The cooldown gate is enforced atomically inside claimDaily itself,
+    // which returns null when the cooldown has not elapsed.
+    userLevelsDb.claimDaily = vi.fn().mockResolvedValue(null);
+
     await command.execute(mockInteraction);
 
-    expect(userLevelsDb.addCoins).not.toHaveBeenCalled();
+    expect(userLevelsDb.claimDaily).toHaveBeenCalled();
     expect(mockInteraction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         embeds: expect.arrayContaining([
@@ -114,13 +134,23 @@ describe('Daily Command', () => {
       lastDailyTimestamp: twentyFiveHoursAgo
     });
 
-    userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
-    userLevelsDb.upsert = vi.fn().mockResolvedValue(undefined);
+    userLevelsDb.claimDaily = vi.fn().mockResolvedValue({
+      userId: 'testUser123',
+      guildId: 'testGuild123',
+      level: 3,
+      coins: 115, // 50 + 65
+      lastDailyTimestamp: 1609459200000
+    });
 
     await command.execute(mockInteraction);
 
     // Expected bonus: 50 (base) + (3 * 5) = 65 coins
-    expect(userLevelsDb.addCoins).toHaveBeenCalledWith('testUser123', 'testGuild123', 65);
+    expect(userLevelsDb.claimDaily).toHaveBeenCalledWith(
+      'testUser123',
+      'testGuild123',
+      65,
+      24 * 60 * 60 * 1000
+    );
     expect(mockInteraction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         embeds: expect.arrayContaining([
@@ -136,12 +166,42 @@ describe('Daily Command', () => {
 
   it('should handle user with no level data', async () => {
     userLevelsDb.get = vi.fn().mockResolvedValue(null);
-    userLevelsDb.addCoins = vi.fn().mockResolvedValue(undefined);
-    userLevelsDb.upsert = vi.fn().mockResolvedValue(undefined);
+    userLevelsDb.claimDaily = vi.fn().mockResolvedValue({
+      userId: 'testUser123',
+      guildId: 'testGuild123',
+      level: 0,
+      coins: 50,
+      lastDailyTimestamp: 1609459200000
+    });
 
     await command.execute(mockInteraction);
 
     // Expected bonus: 50 (base) + (0 * 5) = 50 coins for level 0
-    expect(userLevelsDb.addCoins).toHaveBeenCalledWith('testUser123', 'testGuild123', 50);
+    expect(userLevelsDb.claimDaily).toHaveBeenCalledWith(
+      'testUser123',
+      'testGuild123',
+      50,
+      24 * 60 * 60 * 1000
+    );
+  });
+
+  it('should report a generic error if claimDaily throws', async () => {
+    userLevelsDb.get = vi.fn().mockResolvedValue({
+      userId: 'testUser123',
+      guildId: 'testGuild123',
+      level: 5,
+      coins: 100,
+      lastDailyTimestamp: 0
+    });
+    userLevelsDb.claimDaily = vi.fn().mockRejectedValue(new Error('DB unavailable'));
+
+    await command.execute(mockInteraction);
+
+    expect(mockInteraction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('erreur'),
+        ephemeral: true
+      })
+    );
   });
 });

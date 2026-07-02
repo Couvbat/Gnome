@@ -3,7 +3,8 @@ import { describe, test, it, expect, vi, beforeEach, afterEach, beforeAll, after
 vi.mock('../database/db', () => ({
   userLevelsDb: {
     getLeaderboard: vi.fn(),
-    get: vi.fn()
+    get: vi.fn(),
+    getUserRank: vi.fn()
   },
   connectDatabase: vi.fn()
 }));
@@ -15,8 +16,13 @@ describe('Leaderboard Command', () => {
   let mockInteraction;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    
+    vi.resetAllMocks();
+
+    // Default: no logged-in user data, so the footer branch is skipped
+    // unless a test explicitly opts in. Avoids order-dependence between tests.
+    (userLevelsDb.get as any).mockResolvedValue(null);
+    (userLevelsDb.getUserRank as any).mockResolvedValue(0);
+
     mockInteraction = {
       isChatInputCommand: vi.fn().mockReturnValue(true),
       options: {
@@ -146,14 +152,7 @@ describe('Leaderboard Command', () => {
       coinsAllTimeHigh: (20 - i) * 60
     }));
 
-    const allUsers = [
-      ...mockLeaderboard,
-      { userId: 'testUser123', level: 5, xp: 2500, coins: 200, totalMessages: 250 }
-    ];
-
-    userLevelsDb.getLeaderboard
-      .mockResolvedValueOnce(mockLeaderboard) // First call for display
-      .mockResolvedValueOnce(allUsers); // Second call for finding position
+    userLevelsDb.getLeaderboard.mockResolvedValue(mockLeaderboard);
 
     userLevelsDb.get.mockResolvedValue({
       userId: 'testUser123',
@@ -161,6 +160,9 @@ describe('Leaderboard Command', () => {
       xp: 2500,
       coins: 200
     });
+
+    // The command finds the user's rank via getUserRank, not a second leaderboard fetch
+    userLevelsDb.getUserRank.mockResolvedValue(11);
 
     mockInteraction.client.users.fetch.mockImplementation((userId) => {
       return Promise.resolve({
@@ -176,6 +178,31 @@ describe('Leaderboard Command', () => {
     const editReplyCall = mockInteraction.editReply.mock.calls[0][0];
     expect(editReplyCall.embeds[0].data.footer).toBeDefined();
     expect(editReplyCall.embeds[0].data.footer.text).toContain('#11'); // 11th position
+  });
+
+  it('should not show a footer when the current user is already in the top list', async () => {
+    const mockLeaderboard = Array.from({ length: 10 }, (_, i) => ({
+      userId: `topUser${i}`,
+      level: 20 - i,
+      xp: (20 - i) * 1000,
+      coins: (20 - i) * 50,
+      totalMessages: (20 - i) * 100,
+      coinsAllTimeHigh: (20 - i) * 60
+    }));
+
+    userLevelsDb.getLeaderboard.mockResolvedValue(mockLeaderboard);
+    userLevelsDb.get.mockResolvedValue({ userId: 'testUser123', level: 20, xp: 20000, coins: 1000 });
+    userLevelsDb.getUserRank.mockResolvedValue(3); // within the displayed top 10
+
+    mockInteraction.client.users.fetch.mockImplementation((userId) => {
+      return Promise.resolve({ id: userId, username: userId });
+    });
+    mockInteraction.options.getInteger.mockReturnValue(null);
+
+    await command.execute(mockInteraction);
+
+    const editReplyCall = mockInteraction.editReply.mock.calls[0][0];
+    expect(editReplyCall.embeds[0].data.footer).toBeUndefined();
   });
 
   it('should handle users that cannot be fetched', async () => {

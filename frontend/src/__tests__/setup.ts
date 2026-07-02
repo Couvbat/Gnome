@@ -1,4 +1,15 @@
 import { vi, beforeEach } from 'vitest';
+import { config } from '@vue/test-utils';
+import PrimeVue from 'primevue/config';
+import Aura from '@primevue/themes/aura';
+
+// Components (e.g. atoms/Input.vue -> PrimeVue's InputText) read $primevue
+// from the app context, so every `mount()` in the test suite needs the
+// PrimeVue plugin installed, matching main.ts's setup.
+config.global.plugins.push([
+  PrimeVue,
+  { theme: { preset: Aura, options: { darkModeSelector: '.app-dark' } } },
+]);
 
 // Mock localStorage
 const localStorageMock = {

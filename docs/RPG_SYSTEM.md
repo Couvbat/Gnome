@@ -236,14 +236,18 @@ Energy gates play and prevents unlimited gambling.
 
 ### Energy cost by game
 
+Each game has a base cost, plus a uniform bet-size surcharge of 1 energy per 100 coins wagered (`floor(bet / 100)`), applied on top of whichever is larger — the base cost or base-plus-scaling:
+
 ```text
-Blackjack: 2 base + (bet / 50)
-Roulette:  1 base + (bet / 80)
-Slots:     1 base + (bet / 50)
-Dice:      1 base + (bet / 100)
+Blackjack: base 2
+Roulette:  base 1
+Slots:     base 1
+Dice:      base 1
+
+cost = max(base, base + floor(bet / 100))
 ```
 
-Example: a 100-coin blackjack bet costs `2 + (100/50) = 4` energy; a 500-coin roulette bet costs `1 + (500/80) ≈ 7.25` energy.
+Example: a 100-coin blackjack bet costs `max(2, 2 + 1) = 3` energy; a 5000-coin blackjack bet costs `max(2, 2 + 50) = 52` energy.
 
 ### Regeneration by class
 

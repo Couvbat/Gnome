@@ -66,7 +66,7 @@ export const command: Command = {
 };
 ```
 
-`bot/index.ts` is the entry point — it loads all commands, manages the `client.cooldowns` Collection (per-command cooldown tracking), handles XP tracking per message (5–15 XP, 60s cooldown), and dispatches interactions. `bot/deploy-commands.ts` is a standalone script that registers slash commands with the Discord API.
+`bot/index.ts` is the entry point — it loads all commands, manages the `client.cooldowns` Collection (per-command cooldown tracking), handles XP tracking per message (5–15 XP, 30s cooldown), and dispatches interactions. `bot/deploy-commands.ts` is a standalone script that registers slash commands with the Discord API.
 
 For long-running operations (any external API call), defer immediately: `await interaction.deferReply()` then `await interaction.editReply(...)`.
 

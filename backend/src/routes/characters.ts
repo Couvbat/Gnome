@@ -4,7 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import { CharacterService, CHARACTER_CLASSES } from '../services/CharacterService';
 import { EnergyService } from '../services/EnergyService';
 import { EconomyService } from '../services/EconomyService';
-import { User, CasinoProfile } from '../models/database';
+import { User, CasinoProfile, Character } from '../models/database';
 
 // Historical starting balance for brand-new casino players, on top of the shared
 // economy's own default of 100 coins (bot/database/db.ts's UserLevel default).
@@ -215,7 +215,6 @@ router.get('/:characterId/stats', async (req: AuthenticatedRequest, res, next) =
     const { characterId } = req.params;
     const { guildId } = req.user!;
 
-    const { Character } = require('../models/database');
     const character = await Character.findOne({
       _id: characterId,
       guildId
@@ -260,7 +259,6 @@ router.get('/leaderboard', async (req: AuthenticatedRequest, res, next) => {
 
     const skip = (page - 1) * limit;
 
-    const { Character } = require('../models/database');
     const characters = await Character.find({ guildId })
       .sort({ level: -1, xp: -1 })
       .skip(skip)
@@ -311,7 +309,6 @@ router.get('/search', async (req: AuthenticatedRequest, res, next) => {
       throw new AppError('Search requires name or className parameter', 400);
     }
 
-    const { Character } = require('../models/database');
     let query: any = { guildId };
 
     if (name) {
