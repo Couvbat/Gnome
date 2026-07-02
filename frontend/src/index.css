@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=JetBrains+Mono:wght@400;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-gnome-dark: #130B05;
+  --color-gnome-surface: #2A1A0E;
+  --color-gnome-gold: #C8922A;
+  --color-gnome-amber: #E5C57C;
+  --color-gnome-garnet: #8B1F15;
+  --color-gnome-felt: #2B4940;
+  --color-gnome-blue: #1E3050;
+  --color-gnome-purple: #3D2155;
+
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+    font-family: var(--font-body);
+  }
+
+  body {
+    @apply m-0 min-h-screen bg-fixed;
+    background:
+      radial-gradient(ellipse at 50% 0%, #2A1508 0%, #1A0D06 35%, #130B05 65%, #0A0603 100%);
+  }
+
+  #root {
+    @apply w-full min-h-screen flex flex-col;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+  }
+}
+
+@layer components {
+  .card {
+    @apply backdrop-blur-sm border rounded-2xl p-6 shadow-xl;
+    background: rgba(42, 26, 14, 0.55);
+    border-color: rgba(200, 146, 42, 0.18);
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 font-bold rounded-xl shadow-lg transition-all duration-300;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, #C8922A, #9E6E18);
+    color: #0A0603;
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
+  }
+  .btn-primary:not(:disabled):hover {
+    background: linear-gradient(135deg, #D4A030, #B07828);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(200, 146, 42, 0.4);
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 rounded-lg transition-all duration-300;
+    background: rgba(200, 146, 42, 0.08);
+    border: 1px solid rgba(200, 146, 42, 0.25);
+    color: #E5C57C;
+    font-family: var(--font-body);
+  }
+  .btn-secondary:hover {
+    background: rgba(200, 146, 42, 0.15);
+    border-color: rgba(200, 146, 42, 0.5);
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl placeholder-white/40 focus:outline-none transition-all;
+    background: rgba(42, 26, 14, 0.7);
+    border: 2px solid rgba(200, 146, 42, 0.25);
+    color: #E5C57C;
+    font-family: var(--font-body);
+  }
+  .input-field:focus {
+    border-color: #C8922A;
+    background: rgba(42, 26, 14, 0.9);
+  }
+
+  /* Skeuomorphic game surfaces */
+  .game-surface-blackjack {
+    background: radial-gradient(ellipse at 50% -10%, #1f4a35 0%, #0f2218 55%, #0a1a12 100%);
+    border-color: rgba(43, 105, 74, 0.55) !important;
+  }
+  .game-surface-blackjack:hover:not(:disabled) {
+    border-color: rgba(60, 160, 100, 0.55) !important;
+    box-shadow: 0 0 32px rgba(43, 120, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .game-surface-roulette {
+    background: radial-gradient(ellipse at 50% 110%, #4a1208 0%, #2a0a06 50%, #180604 100%);
+    border-color: rgba(139, 31, 21, 0.5) !important;
+  }
+  .game-surface-roulette:hover:not(:disabled) {
+    border-color: rgba(200, 60, 40, 0.55) !important;
+    box-shadow: 0 0 32px rgba(139, 31, 21, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .game-surface-slots {
+    background: linear-gradient(155deg, #2a1f0e 0%, #1a1408 40%, #231c0a 60%, #1a1408 100%);
+    border-color: rgba(139, 105, 20, 0.5) !important;
+  }
+  .game-surface-slots:hover:not(:disabled) {
+    border-color: rgba(200, 146, 42, 0.6) !important;
+    box-shadow: 0 0 32px rgba(200, 146, 42, 0.25), inset 0 1px 0 rgba(255, 220, 100, 0.05);
+  }
+
+  .game-surface-dice {
+    background: radial-gradient(ellipse at 30% 30%, #221c10 0%, #17130a 50%, #0e0c07 100%);
+    border-color: rgba(90, 75, 45, 0.5) !important;
+  }
+  .game-surface-dice:hover:not(:disabled) {
+    border-color: rgba(140, 120, 70, 0.6) !important;
+    box-shadow: 0 0 32px rgba(120, 100, 50, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+}
+
+/* Ambient embers */
+@keyframes ember-rise {
+  0% {
+    transform: translateY(0) translateX(0) scale(1);
+    opacity: 0;
+  }
+  12% { opacity: 0.85; }
+  88% { opacity: 0.12; }
+  100% {
+    transform: translateY(-95vh) translateX(var(--ember-drift, 20px)) scale(0.1);
+    opacity: 0;
+  }
+}
+
+.ember-field {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  overflow: hidden;
+}
+
+.ember {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffe566, #ff9200);
+  box-shadow: 0 0 6px 2px rgba(255, 150, 0, 0.55), 0 0 14px 5px rgba(255, 100, 0, 0.2);
+  animation-name: ember-rise;
+  animation-timing-function: ease-in;
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ember { animation: none; opacity: 0; }
+}
