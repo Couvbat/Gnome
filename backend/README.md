@@ -243,21 +243,23 @@ The backend deploys to **o2switch shared hosting** via cPanel's **Setup Node.js 
 ### cPanel application setup
 
 1. In cPanel, create the subdomain (e.g. `api.example.com`) and enable AutoSSL for it (SSL/TLS Status → Run AutoSSL). HTTPS is mandatory for Discord Activities.
-2. Over SSH, clone the repo into your home directory:
+2. Over SSH, clone the repo **inside the application root** — the physical folder named after the subdomain:
    ```bash
-   git clone <repo-url> ~/gnome
+   git clone <repo-url> ~/api.example.com/gnome
    ```
-3. In **Setup Node.js App**, create the application:
-   - **Node.js version** — the newest available (18 minimum)
-   - **Application root** — `gnome/backend`
-   - **Application URL** — the subdomain, mounted at `/`
-   - **Application startup file** — `dist/index.js`
-4. Copy the "enter to virtual environment" command shown at the top of the app's page, run it over SSH, then install and build:
+3. In **Setup Node.js App** (*Créer une application*), create the application:
+   - **Node.js version** — the newest available (o2switch offers 24.x; 18 minimum)
+   - **Application mode** (*Mode d'application*) — `Production`. This is what sets `NODE_ENV` — don't add it as an env variable.
+   - **Application root** (*Racine de l'application*) — the subdomain's folder: `api.example.com`
+   - **Application URL** (*URL de l'application*) — the subdomain, path left empty (mounted at `/`)
+   - **Application startup file** (*Fichier de démarrage*) — `gnome/backend/dist/index.js`, relative to the application root
+4. Copy the "enter to virtual environment" command shown at the top of the app's page, run it over SSH, then install and build from the backend package:
    ```bash
+   cd ~/api.example.com/gnome/backend
    npm ci
    npm run build
    ```
-5. Add the environment variables in the app's UI: `NODE_ENV=production`, `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, and `DISCORD_ACTIVITY_URL` (this is also the allowed CORS origin — set it to the Activity's proxy origin, `https://<discord-app-id>.discordsays.com`). **Do not set `PORT`** — Passenger assigns it and the server already reads `process.env.PORT`.
+5. Add the environment variables in the app's UI (*Ajouter une variable*): `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, and `DISCORD_ACTIVITY_URL` (this is also the allowed CORS origin — set it to the Activity's proxy origin, `https://<discord-app-id>.discordsays.com`). **Do not set `PORT`** — Passenger assigns it and the server already reads `process.env.PORT`.
 6. Click **Restart** in the app UI. Verify with `curl https://api.example.com/health`.
 
 ### Reaching the home MongoDB
@@ -276,13 +278,13 @@ o2switch fronts Node apps with LiteSpeed + Passenger, which supports WebSocket u
 ### Updating
 
 ```bash
-cd ~/gnome && git pull
+cd ~/api.example.com/gnome && git pull
 cd backend
 npm ci
 npm run build
 ```
 
-Then **Restart** the app from the cPanel UI (or `touch ~/gnome/backend/tmp/restart.txt`).
+Then **Restart** the app from the cPanel UI (or `touch ~/api.example.com/tmp/restart.txt` — Passenger watches `tmp/restart.txt` under the application root).
 
 ## Further reading
 
