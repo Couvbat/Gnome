@@ -10,28 +10,28 @@ This directory contains comprehensive end-to-end (E2E) tests for the Gnome Casin
 
 ### Test files
 
-1. **`auth-routes.e2e.test.ts`** - Authentication API tests (✅ 100% passing)
+1. **`auth-routes.e2e.test.ts`** - Authentication API tests
    - Development authentication (`/api/auth/dev`)
    - Discord OAuth authentication (`/api/auth/discord`)
    - JWT token generation and validation
    - Token expiration handling
    - User creation flow via `/api/auth/me`
 
-2. **`casino-routes.e2e.test.ts`** - Casino API tests (✅ 100% passing)
+2. **`casino-routes.e2e.test.ts`** - Casino API tests
    - User profile retrieval (`/api/casino/profile`)
    - Daily reward system (`/api/casino/daily`)
    - Level-based reward scaling
    - Energy restoration mechanics
    - Authentication enforcement
 
-3. **`casino-rpg-workflow.e2e.test.ts`** - Complete workflow tests (✅ 100% passing)
+3. **`casino-rpg-workflow.e2e.test.ts`** - Complete workflow tests
    - New player onboarding flow
    - Character creation and progression
    - Casino gameplay sessions
    - Daily reward routines
    - Error recovery scenarios
 
-4. **`games-routes.e2e.test.ts`** - Casino games API tests (✅ 100% passing)
+4. **`games-routes.e2e.test.ts`** - Casino games API tests
    - Slots game spin (`/api/games/slots/spin`)
    - Dice game roll (`/api/games/dice/roll`)
    - Dice game info (`/api/games/dice/info`)
@@ -43,7 +43,7 @@ This directory contains comprehensive end-to-end (E2E) tests for the Gnome Casin
    - Minimum bet validation
    - Authentication enforcement across all endpoints
 
-5. **`progression-routes.e2e.test.ts`** - Progression system API tests (✅ 100% passing)
+5. **`progression-routes.e2e.test.ts`** - Progression system API tests
    - Energy status (`/api/progression/energy`)
    - Energy restoration (`/api/progression/energy/restore`)
    - Reputation status (`/api/progression/reputation`)
@@ -55,7 +55,7 @@ This directory contains comprehensive end-to-end (E2E) tests for the Gnome Casin
    - Cooldown and usage tracking
    - Full progression flow workflows
 
-6. **`quests-routes.e2e.test.ts`** - Quest system API tests (✅ 100% passing)
+6. **`quests-routes.e2e.test.ts`** - Quest system API tests
    - Available quests listing (`/api/quests/available`)
    - Active quests (`/api/quests/active`)
    - Quest history (`/api/quests/history`)
@@ -233,27 +233,13 @@ it('should complete multi-step workflow', async () => {
 });
 ```
 
-## Known issues & limitations
+## Known limitations
 
-### Current limitations
+1. **Database mocking** — tests mock database models rather than hitting a real test database. Fast and isolated, but doesn't exercise actual database interactions (consider `mongodb-memory-server` for true integration tests).
+2. **`username` field** — a common source of test failures is a mocked `User` missing the `username` field; always include it.
+3. **Concurrent request testing** — race conditions are hard to test against mocks; a real database is needed for that.
 
-1. **Database Mocking**: Tests use mocked database models rather than a real test database
-   - ✅ Pros: Fast, isolated, no external dependencies
-   - ⚠️ Cons: Doesn't test actual database interactions
-
-2. **Mock Inconsistencies**: Some tests fail due to missing `username` field in mocks
-   - Fix: Always include `username` in User mocks
-
-3. **Concurrent Request Testing**: Limited testing of race conditions
-   - Complex to test with mocks
-   - Consider integration tests with real database for this
-
-### Future improvements
-
-- [ ] Add mongodb-memory-server for true database integration tests
-- [ ] Add WebSocket E2E tests for multiplayer casino features
-- [ ] Add performance benchmarks for API endpoints
-- [ ] Add API response schema validation
+There is no WebSocket E2E coverage yet for the multiplayer table events (see [backend/README.md](../README.md#websocket-events) for the event list).
 
 ## Debugging failed tests
 
@@ -302,20 +288,9 @@ console.log('Token payload:', decoded);
 
 ## Best practices
 
-### ✅ Do
-- Mock all database operations
-- Use descriptive test names explaining the workflow
-- Test both success and error scenarios
-- Clear mocks between tests with `vi.clearAllMocks()`
-- Include all required fields in mocks (especially `username`)
-- Test authentication on protected routes
+**Do** — mock all database operations; use descriptive test names describing the workflow; test both success and error scenarios; clear mocks between tests with `vi.clearAllMocks()`; include all required fields in mocks (especially `username`); test authentication on protected routes.
 
-### ❌ Don't
-- Make real API calls to external services
-- Depend on test execution order
-- Skip error case testing
-- Hardcode tokens or secrets
-- Leave console.log statements in committed code
+**Don't** — make real calls to external services; depend on test execution order; skip error-case testing; hardcode tokens or secrets; leave `console.log` statements in committed code.
 
 ## Further reading
 
@@ -331,5 +306,3 @@ These tests should be updated when:
 - API request/response schemas change
 - Authentication flow changes
 - Database models are modified
-
-Last Updated: 2025-12-05

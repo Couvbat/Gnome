@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `bot/` — Discord bot (Discord.js v14 + TypeScript): 30 slash commands, AI, music, LoL stats, economy
 - `backend/` — Casino API server (Express.js + Socket.io + MongoDB): multiplayer games, RPG system
-- `frontend/` — Discord Activity UI (Vue 3 + TypeScript + Vite): casino game interfaces (85% complete)
+- `frontend/` — Discord Activity UI (Vue 3 + TypeScript + Vite): casino game interfaces
 
 Each package has its own `package.json`, `tsconfig.json`, `.env`, and `__tests__/` directory. There is no root-level build or test script — work inside the relevant package directory.
 
@@ -88,10 +88,10 @@ The backend has four layers:
 
 - **Engines** (`src/engines/`): stateless game logic — `BlackjackEngine`, `RouletteEngine`, `SlotsEngine`, `DiceEngine`
 - **Managers** (`src/managers/`): stateful multiplayer coordination — `BlackjackTableManager` (2–6 player turn-based), `RouletteTableManager` (30s betting timer → spin → payouts)
-- **Services** (`src/services/`): business logic — `CharacterService`, `AbilityService`, `EnergyService`, `BardAbilities`, `WarriorAbilities`, `QuestService`
+- **Services** (`src/services/`): business logic — `CharacterService`, `AbilityService`, `EnergyService`, `EconomyService`, `ReputationService`, `BardAbilities`, `QuestService`
 - **WebSocket** (`src/websocket/socketHandlers.ts`): Socket.io handlers for real-time events (`roulette:join_table`, `blackjack:action`, `bard:trigger_lucky_song`, etc.)
 
-The bot and backend **share the same MongoDB database** — backend routes reuse the `User` schema from `bot/database/db.ts` for coin/XP balances.
+The bot and backend **share the same MongoDB database** — the backend's `SharedEconomy` model (`src/models/database.ts`) points at the same `userlevels` collection the bot's `UserLevel` schema (`bot/database/db.ts`) writes to, keeping coin/XP balances in sync.
 
 ### RPG Character Classes
 
@@ -128,7 +128,7 @@ Frontend requires HTTPS for Discord Activity development — local certs in `fro
 Each package needs its own `.env` from `.env.example`. Key variables:
 
 - **bot**: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`, `MISTRAL_API_KEY`, `OPENAI_API_KEY`, `RIOT_GAMES_API_KEY`, `MONGODB_URI`
-- **backend**: `PORT`, `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, `ALLOWED_ORIGINS`
+- **backend**: `PORT`, `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, `CORS_ORIGIN`
 - **frontend**: `VITE_API_URL`, `VITE_WS_URL`, `VITE_DISCORD_CLIENT_ID`
 
 System prerequisites: Node.js 22.17.0+, MongoDB, FFmpeg (audio), YT-DLP (YouTube streaming), mkcert (frontend HTTPS).

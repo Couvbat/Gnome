@@ -1,462 +1,169 @@
-# Le Gnome casino frontend
+# Le Gnome — casino frontend
 
-> React + TypeScript + Vite frontend for the Discord Activity "La Taverne Dorée" with complete character creation and multiplayer casino games.
-
-The frontend UI for the multiplayer casino Discord Activity, featuring 6 RPG character classes, 4 casino games, real-time WebSocket integration, and Discord SDK authentication.
-
-## Implementation status
-
-| Feature | Status | Details |
-|---------|--------|---------|
-| **React framework** | ✅ 100% | React 18 + TypeScript + Vite |
-| **Component library** | ✅ 100% | 12 functional components |
-| **Character system** | ✅ 100% | 6 RPG classes with creation UI |
-| **Game interfaces** | ✅ 100% | Blackjack, Roulette, Slots, Dice |
-| **Discord SDK** | ✅ 100% | Activities authentication integrated |
-| **WebSocket** | ✅ 100% | Socket.io real-time connection |
-| **Styling** | ✅ 100% | Tailwind CSS v4 design system |
-| **Tests** | ⏳ 0% | Vitest + RTL setup pending |
-| **3D graphics** | ⏳ 0% | Three.js tavern environment planned |
-
-**Overall completion:** ✅ **85% complete** — fully functional casino with pending tests and 3D enhancements
+Vue 3 + TypeScript + Vite frontend for the Discord Activity casino "La Taverne Dorée". Renders character creation and the multiplayer casino games inside Discord's embedded app surface.
 
 ## Getting started
 
 ### Prerequisites
-- **Node.js** v22.17.0 or higher
-- **Backend server** running on port 3001 (see [Backend README](../backend/README.md))
-- **Discord Application** configured for Activities
-- **mkcert** (for local HTTPS development)
+
+- Node.js 22.17.0+
+- The [backend](../backend/README.md) running on port 3001
+- A Discord application configured for Activities
+- mkcert (local HTTPS)
 
 ### Installation
 
 ```bash
-cd frontend
 npm install
 ```
 
 ### HTTPS setup (required for Discord Activity)
 
-Discord Activities require HTTPS. Generate local SSL certificates:
-
 ```bash
-# Install mkcert
-# Windows:
-winget install FiloSottile.mkcert
-# macOS:
-brew install mkcert
-# Linux:
-sudo apt install mkcert
+# install mkcert, e.g.
+winget install FiloSottile.mkcert   # Windows
+brew install mkcert                 # macOS
 
-# Install local Certificate Authority
 mkcert -install
 
-# Generate certificates in frontend directory
-cd frontend
-mkdir -p certs
-cd certs
+mkdir certs && cd certs
 mkcert -key-file localhost-key.pem -cert-file localhost.pem localhost 127.0.0.1 ::1
 ```
 
+`vite.config.ts` picks up `certs/localhost.pem` and `certs/localhost-key.pem` automatically if present; otherwise it falls back to plain HTTP.
+
 ### Environment configuration
 
-Create `.env` in `/frontend/` directory:
+Create `.env` in `frontend/`:
 
 ```env
-# API Endpoints
 VITE_API_URL=http://localhost:3001
 VITE_WS_URL=http://localhost:3001
-
-# Discord Integration
 VITE_DISCORD_CLIENT_ID=discord_client_id
-
-# Development Features
-VITE_DEV_MODE=true  # Enable character reset for testing
 ```
 
 ### Discord Developer Portal setup
 
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Select your application
-3. Navigate to **Activities** section
-4. Enable Activities if not already enabled
-5. Set **Activity URL Override** to: `https://localhost:3000/`
-6. Save changes
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and select your application.
+2. Enable **Activities**.
+3. Set the **Activity URL Override** to `https://localhost:3000/`.
 
 ### Development
 
 ```bash
-npm run dev      # Start dev server (https://localhost:3000)
-npm run build    # Production build
-npm run preview  # Preview production build
-npm run test     # Run unit tests (when implemented)
+npm run dev          # dev server on https://localhost:3000
+npm run build         # production build (no type check)
+npm run type-check    # vue-tsc, checks .vue and .ts files
+npm run preview
+npm run lint
+npm test               # Vitest
+npm run test:watch
+npm run test:coverage
 ```
 
-### Testing in Discord
+To test inside Discord: start the backend, start the frontend, join a voice channel, then launch the Activity from the Activities menu — the app loads with Discord OAuth handling authentication.
 
-1. **Start backend**: `cd backend && npm run dev`
-2. **Start frontend**: `cd frontend && npm run dev`
-3. Open Discord and join a voice channel
-4. Click the **Activities** button (rocket icon)
-5. Select your application from the Activity menu
-6. The app loads inside Discord with OAuth authentication
+Opening `https://localhost:3000` directly in a browser (outside Discord) falls back to a mock Discord SDK plus `apiService.devLogin`, so the character-creation and casino flows can be exercised without going through Discord.
 
 ## Architecture
+
+### Stack
+
+| Technology | Purpose |
+|---|---|
+| Vue 3 (Composition API, `<script setup>`) | UI framework |
+| TypeScript | Type-safe development |
+| Vite | Build tool and dev server |
+| PrimeVue 4 (Aura theme) | Component library |
+| Tailwind CSS 4 | Utility styling |
+| `@discord/embedded-app-sdk` | Discord Activity authentication and voice-participant info |
+| Socket.io-client | Real-time WebSocket connection to the backend |
+| Axios | REST client |
+| Vitest + `@vue/test-utils` | Testing |
+
+There is no router (view switching is a local `ref` in `App.vue`) and no global state library (Pinia/Vuex) — shared reactive state lives in composables (`useDiscordSdk`, `useEnergy`).
 
 ### Project structure
 
 ```text
 frontend/
 ├── src/
-│   ├── components/              # 12 React components
-│   │   ├── CharacterCreation.tsx    # 6 RPG class creation UI
-│   │   │   └── CharacterCreation.css
-│   │   ├── CasinoLobby.tsx          # Main lobby & navigation
-│   │   │   └── CasinoLobby.css
-│   │   ├── UserProfile.tsx          # Stats & character info
-│   │   └── games/                   # 4 casino game UIs
-│   │       ├── BlackjackTable.tsx   # Multiplayer blackjack (2-6 players)
-│   │       │   └── BlackjackTable.css
-│   │       ├── RouletteWheel.tsx    # European roulette wheel
-│   │       │   └── RouletteWheel.css
-│   │       ├── SlotMachine.tsx      # Progressive jackpot slots
-│   │       │   └── SlotMachine.css
-│   │       └── DiceGame.tsx         # Two-dice prediction game
-│   │           └── DiceGame.css
+│   ├── App.vue                 # root component; Discord SDK init, auth, view routing
+│   ├── main.ts                  # createApp + PrimeVue registration
+│   ├── components/
+│   │   ├── CharacterCreation.vue   # class picker + character creation
+│   │   ├── CasinoLobby.vue          # game selection hub
+│   │   ├── CharacterProfile.vue
+│   │   ├── UserProfileModal.vue
+│   │   ├── VoiceParticipants.vue
+│   │   ├── games/
+│   │   │   ├── BlackjackTable.vue
+│   │   │   ├── RouletteWheel.vue
+│   │   │   ├── SlotMachine.vue
+│   │   │   ├── DiceGame.vue
+│   │   │   └── blackjack/          # BettingControls, DealerSection, GameControls, PlayerSeat
+│   │   ├── atoms/                    # Badge, Button, Card, Icon, Input, Modal, ProgressBar, Spinner, ...
+│   │   ├── molecules/                 # BetControls, GameCard, LoadingScreen, RouletteBetButtons, ...
+│   │   └── organisms/                  # AppHeader, CharacterInfoCard, EnergyDisplay, GamesGrid, ...
+│   ├── composables/
+│   │   ├── useDiscordSdk.ts
+│   │   └── useEnergy.ts
 │   ├── services/
-│   │   ├── api.ts               # REST API client (Axios)
-│   │   └── websocket.ts         # Socket.io WebSocket client
-│   ├── hooks/
-│   │   └── useDiscordSdk.ts     # Discord SDK integration hook
-│   ├── types/
-│   │   └── index.ts             # TypeScript interfaces
-│   ├── App.tsx                  # Main application component
-│   ├── main.tsx                 # Application entry point
-│   └── index.css                # Global styles
-├── certs/                       # HTTPS certificates (gitignored)
-├── public/                      # Static assets
-├── index.html
-├── package.json
-├── tsconfig.json
-├── vite.config.ts               # Vite + HTTPS configuration
-├── vitest.config.ts             # Test framework setup
-├── tailwind.config.js           # Tailwind CSS v4 config
-└── postcss.config.js            # PostCSS configuration
+│   │   ├── api.ts              # Axios REST client
+│   │   ├── websocket.ts        # Socket.io-client wrapper
+│   │   └── discordSdk.ts       # Discord embedded-app-sdk wrapper (falls back to a mock outside Discord)
+│   ├── utils/
+│   │   └── cardUtils.ts         # playing-card helpers
+│   ├── constants/index.ts       # CHARACTER_CLASSES, GAME_CONFIG, ROULETTE_CONFIG, ...
+│   ├── types/index.ts
+│   ├── assets/kenney_playing-cards-pack/   # card artwork
+│   └── __tests__/               # api, cardUtils, discordSdk, websocket tests
+├── certs/                       # local HTTPS certs (gitignored)
+├── vite.config.ts               # HTTPS, /api and /socket.io proxy to :3001, Discord CSP headers
+├── vitest.config.ts
+└── tailwind.config.js
 ```
 
-### Technology stack
+### Services
 
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **React** | 18+ | UI framework with hooks |
-| **TypeScript** | 5+ | Type-safe development |
-| **Vite** | 5+ | Build tool with HMR |
-| **Discord SDK** | 2.4.0 | Activities authentication |
-| **Socket.io-client** | 4.7.2 | Real-time WebSocket |
-| **Axios** | Latest | REST API client |
-| **Tailwind CSS** | 4+ | Utility-first styling |
-| **Vitest** | Latest | Unit testing (planned) |
-| **React Testing Library** | Latest | Component testing (planned) |
+- **`api.ts`** — Axios client (base URL `/api`) with a bearer-token interceptor. Exposes `login`, `devLogin`, `getCurrentUser`, character CRUD, table creation, `spinSlots`, `rollDice`, `getEnergy`, and game history.
+- **`websocket.ts`** — Socket.io-client wrapper exposing `connect`/`disconnect`/`on`/`off`/`emit` plus typed helpers for joining tables, betting, hitting/standing, and triggering the Bard's Lucky Song ability.
+- **`discordSdk.ts`** — wraps `@discord/embedded-app-sdk`: initialization, current user/channel/guild, voice participants, activity state. Falls back to a mock SDK when not running inside Discord, for local development.
 
 ## Features
 
-### RPG character system
+### Character creation
 
-Complete character creation interface with 6 playable classes:
-
-| Class | Icon | Casino bonus | Primary stats |
-|-------|------|--------------|---------------|
-| **Warrior** | 🗡️ | +15% comeback chance, vitality bonuses | Strength, Vitality |
-| **Mage** | 🔮 | +10% prediction accuracy, intelligence bonuses | Intelligence, Luck |
-| **Rogue** | 🥷 | +20% high-risk gains, dexterity bonuses | Dexterity, Luck |
-| **Merchant** | 💰 | +5% all gains, -10% minimum bets | Charisma, Intelligence |
-| **Bard** | 🎵 | +3% per player (max 15%), charisma bonuses | Charisma, Luck |
-| **Paladin** | ⚔️ | +8% consistent gains, loss protection | Strength, Charisma, Vitality |
-
-**Character creation features:**
-- Visual class selection with icons and descriptions
-- Stats preview for each class
-- Unique ability explanations
-- Casino bonus breakdowns
-- Instant character validation
-
-**Dev mode feature:**
-When `VITE_DEV_MODE=true`:
-- Auto-deletes existing test characters (`dev-user-demo`)
-- Resets energy, XP, and casino profile
-- Enables rapid iteration for character testing
-- **Disabled in production** to preserve user data
+Six RPG classes (Warrior, Mage, Rogue, Merchant, Bard, Paladin), defined in `src/constants/index.ts`. Selecting a class shows its casino bonus and special ability before confirming creation via `apiService.createCharacter`.
 
 ### Casino games
 
-#### Blackjack (multiplayer)
-- **Players**: 2-6 simultaneous players per table
-- **Actions**: Hit, Stand, Double Down
-- **UI features**:
-  - Dealer section with face-up/face-down cards
-  - Individual player hands with bet amounts
-  - Real-time card dealing animations
-  - Synchronized game state via WebSocket
-  - Class bonuses applied to payouts
+- **Blackjack** — multiplayer table (2–6 players), dealer section, hit/stand/double controls, synchronized via WebSocket
+- **Roulette** — European wheel (0–36), interactive betting grid, synchronized betting timer
+- **Slots** — themed reels with progressive jackpot
+- **Dice** — two-dice roll with prediction-based multipliers
 
-#### Roulette (European)
-- **Wheel**: 37 numbers (0-36) with color coding
-- **Bet types**: Red/Black, Even/Odd, Straight, Split, Street, Corner
-- **Features**:
-  - Interactive betting grid
-  - 30-second betting timer with countdown
-  - Animated wheel spinning
-  - Real-time bet placement from all players
-  - Instant payout calculations
+All four games connect to the backend's REST API for solo actions and Socket.io for multiplayer table state.
 
-#### Slot machine
-- **Reels**: 3 reels with 7 unique symbols
-- **Jackpot**: Progressive jackpot system
-- **Multipliers**:
-  - 7️⃣ 7️⃣ 7️⃣: x10
-  - 💎 💎 💎: x8
-  - Triple match: x5
-  - Double match: x2
-- **Features**: Animated reel spinning, win celebrations, payout table display
+## Testing
 
-#### Dice game
-- **Mechanics**: Two-dice rolling with prediction
-- **Multipliers**: x6 to x36 based on probability
-- **UI**: Animated dice rolling, prediction interface, multiplier display
-
-### Integration features
-
-#### Discord SDK integration
-```typescript
-import { DiscordSDK } from '@discord/embedded-app-sdk';
-
-// Initialize Discord SDK
-const discordSdk = new DiscordSDK(clientId);
-await discordSdk.ready();
-
-// Authenticate user
-const { access_token } = await discordSdk.commands.authorize({
-  client_id: clientId,
-  response_type: 'code',
-  state: '',
-  prompt: 'none',
-  scope: ['identify', 'guilds']
-});
-```
-
-#### REST API integration
-```typescript
-import { apiService } from './services/api';
-
-// User authentication
-await apiService.login(discordToken);
-
-// Character management
-await apiService.createCharacter({ name: 'Hero', class: 'warrior' });
-const character = await apiService.getCharacter();
-
-// Casino operations
-const profile = await apiService.getCasinoProfile();
-const tables = await apiService.getActiveTables('blackjack');
-```
-
-#### WebSocket integration
-```typescript
-import { wsService } from './services/websocket';
-
-// Connect with JWT token
-wsService.connect(authToken);
-
-// Join table
-wsService.joinTable(tableId);
-
-// Place bet
-wsService.placeBet(tableId, { type: 'red', amount: 50 });
-
-// Listen to events
-wsService.on('table_updated', (table) => {
-  console.log('Table state:', table);
-});
-
-wsService.on('spin:result', (result) => {
-  console.log('Roulette result:', result);
-});
-```
-
-## Design system: "La Taverne Dorée"
-
-### Color palette
-
-```css
-/* Primary Colors */
---gold-primary: #D4AF37;        /* Tavern gold */
---gold-bright: #FFD700;         /* Bright gold accents */
---oak-wood: #8B4513;            /* Dark oak brown */
---warm-orange: #FF6B35;         /* Accent highlights */
---dark-tavern: #2C1810;         /* Deep brown background */
---dark-navy: #1A1A2E;           /* Alternative dark */
-
-/* Game-specific */
---roulette-red: #E63946;
---roulette-black: #1D3557;
---roulette-green: #2A9D8F;
-```
-
-### Typography
-
-- **Headings**: "Cinzel" (elegant serif for tavern atmosphere)
-- **Body**: "Open Sans" (clean, readable sans-serif)
-- **Monospace**: "JetBrains Mono" (numbers, stats, data)
-
-### Component patterns
-
-All game components follow consistent patterns:
-- **Header**: Game title + current balance
-- **Main area**: Interactive game interface
-- **Actions**: Bet controls and game actions
-- **Footer**: Help text and status messages
-
-## Testing (planned)
-
-### Test framework setup
-
-```bash
-npm test              # Run all tests
-npm run test:watch    # Watch mode
-npm run test:coverage # Coverage report
-```
-
-### Planned test coverage
-
-- **Component tests**: All 12 components with RTL
-- **Integration tests**: API service layer
-- **WebSocket tests**: Socket.io event handling
-- **E2E tests**: Full user workflows with Playwright
-
-## Platform support
-
-| Platform | Status | Notes |
-|----------|--------|-------|
-| **Discord Desktop** | ✅ Full | Complete experience |
-| **Discord Web** | ✅ Full | Optimal performance |
-| **Discord Mobile (iOS)** | ✅ Full | Touch-optimized UI |
-| **Discord Mobile (Android)** | ✅ Full | Platform adaptations |
-| **Tablets** | ✅ Full | Responsive layout |
-
-### Responsive breakpoints
-
-```css
-/* Tailwind CSS breakpoints */
-sm: 640px    /* Small devices */
-md: 768px    /* Tablets */
-lg: 1024px   /* Desktop */
-xl: 1280px   /* Large desktop */
-```
-
-## Deployment
-
-### Production build
-
-```bash
-# Build optimized production bundle
-npm run build
-
-# Preview production build locally
-npm run preview
-
-# Analyze bundle size
-npm run build && npm run analyze
-```
-
-### Discord Activity deployment
-
-1. **Build**: `npm run build`
-2. **Upload**: Deploy `dist/` to CDN (Vercel, Netlify, etc.)
-3. **Configure Discord**:
-   - Go to Discord Developer Portal
-   - Update **Activity URL** to your production URL
-   - Test with Discord desktop and mobile clients
-4. **SSL**: Ensure HTTPS is properly configured
-
-### Performance optimizations
-
-- **Code splitting**: Lazy loading for game components
-- **Asset optimization**: WebP images with fallbacks
-- **Bundle size**: Tree shaking and minification
-- **Caching**: Browser cache headers for static assets
-- **React optimization**: `React.memo` for expensive renders
-
-## Roadmap
-
-### Phase 1: Core foundation (complete)
-- Base React app with TypeScript
-- Discord SDK authentication
-- WebSocket real-time integration
-- Casino lobby interface
-- 6 RPG character classes
-- 4 casino game interfaces
-
-### Phase 2: Enhancements (in progress)
-- Advanced card animations (Blackjack)
-- Particle effects for wins
-- Sound effects and music
-- Integrated tavern chat system
-- Real-time notifications
-
-### Phase 3: Advanced features (planned)
-- **3D tavern environment**: Three.js immersive lobby
-- **Quest UI**: Interactive quest tracking
-- **Character profiles**: Detailed stats and achievements
-- **Spectator mode**: Watch games without playing
-- **Tournaments**: Scheduled competitive events
-- **Mobile optimizations**: Touch gestures and haptics
-
-### Phase 4: Social and community (future)
-- Guild system integration
-- Friend leaderboards
-- Achievement badges
-- Trading and gifting
-- Social feed
+Four Vitest test files under `src/__tests__/`, using `@vue/test-utils` and jsdom: `api.test.ts`, `cardUtils.test.ts`, `discordSdk.test.ts`, `websocket.test.ts`.
 
 ## Troubleshooting
 
-### Common issues
+**Discord Activity won't load** — check the HTTPS certs are valid, the backend is running on port 3001, and the Activity URL in the Discord Developer Portal matches.
 
-**Discord Activity won't load:**
-- Verify HTTPS certificates are valid (check browser console)
-- Ensure backend is running on port 3001
-- Check Discord Developer Portal Activity URL matches
-- Verify `VITE_DISCORD_CLIENT_ID` is correct in `.env`
+**WebSocket connection fails** — verify `VITE_WS_URL` matches the backend and check the browser console for connection errors.
 
-**WebSocket connection fails:**
-- Check backend WebSocket server is running
-- Verify `VITE_WS_URL` in `.env` matches backend
-- Inspect browser console for connection errors
-- Ensure JWT token is valid
-
-**Character creation errors:**
-- Check backend `/api/characters/create` endpoint
-- Verify MongoDB is running
-- Review backend logs for validation errors
-- Ensure character name is unique
-
-**Games not loading:**
-- Verify all game components are properly imported
-- Check browser console for JavaScript errors
-- Ensure WebSocket connection is established
-- Test API endpoints with curl/Postman
+**Character creation errors** — check the backend `/api/characters/create` endpoint and MongoDB connectivity.
 
 ## Further reading
 
-- **[Backend Casino API](../backend/README.md)** — Express.js server documentation
-- **[Bot Discord](../bot/README.md)** — Discord.js bot with economy integration
-- **[Testing guide](../docs/TESTING.md)** — Comprehensive testing documentation
-- **[RPG system](../docs/RPG_SYSTEM.md)** — Character class architecture
-- **[Main README](../README.md)** — Complete project overview
+- [Backend casino API](../backend/README.md)
+- [Bot](../bot/README.md)
+- [Testing guide](../docs/TESTING.md)
+- [RPG system](../docs/RPG_SYSTEM.md)
 
 ## License
 
-ISC License — See root repository LICENSE file
-
-**The future of Discord casino is here.**
-*From text commands to an immersive multiplayer experience in "La Taverne Dorée"*
+ISC
