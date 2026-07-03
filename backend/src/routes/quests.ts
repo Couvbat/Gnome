@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { AppError } from '../middleware/errorHandler';
 import { QuestService } from '../services/QuestService';
 
 const router = Router();
@@ -100,40 +99,13 @@ router.post('/:questId/abandon', async (req: AuthenticatedRequest, res, next) =>
   }
 });
 
-// =====================
-// QUEST PROGRESS (Internal API for game engines)
-// =====================
-
-// POST /api/quests/progress - Update quest progress (internal use)
-router.post('/progress', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { userId, guildId } = req.user!;
-    const { type, target, amount } = req.body;
-
-    if (!type || amount === undefined) {
-      throw new AppError('Missing type or amount', 400);
-    }
-
-    const result = await QuestService.updateQuestProgress(userId, guildId, {
-      type,
-      target,
-      amount
-    });
-
-    res.json({
-      success: true,
-      questsUpdated: result.questsUpdated,
-      questsCompleted: result.questsCompleted,
-      message: result.questsCompleted.length > 0
-        ? `${result.questsCompleted.length} quest(s) completed!`
-        : result.questsUpdated.length > 0
-          ? 'Quest progress updated'
-          : 'No active quests affected'
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+// NOTE: A POST /api/quests/progress endpoint used to live here, documented as
+// "internal use" for game engines to report progress. Nothing in the codebase
+// actually called it that way - it was directly reachable by any authenticated
+// user, letting them complete quests instantly by POSTing arbitrary progress
+// amounts. It has been removed. Game engines call QuestService.updateQuestProgress()
+// in-process; if a genuine internal/service-to-service caller is ever needed, it
+// should go through real service authentication, not a plain authenticated-user route.
 
 // =====================
 // ADMIN QUEST MANAGEMENT

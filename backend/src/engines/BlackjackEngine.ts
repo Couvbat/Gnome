@@ -3,6 +3,7 @@ import type { IBlackjackPlayer } from '../models/database';
 import { AppError } from '../middleware/errorHandler';
 import { CharacterService } from '../services/CharacterService';
 import { EconomyService } from '../services/EconomyService';
+import { AbilityService } from '../services/AbilityService';
 
 export interface Card {
   suit: 'hearts' | 'diamonds' | 'clubs' | 'spades';
@@ -90,10 +91,16 @@ export class BlackjackEngine extends CasinoGameEngine {
     let characterAdvice = '';
     let bonusInfo = '';
 
-    // Mage card reading ability
-    if (context.characterBonus.className === 'mage' && Math.random() < 0.3) {
-      characterAdvice = this.getMageCardAdvice(playerHand, dealerUpCard, deck);
-      bonusInfo = 'mage_card_reading';
+    // Mage card reading ability - gated through AbilityService (cooldown/energy/session
+    // limits), same as Warrior/Bard abilities elsewhere in this file, instead of firing
+    // on a bare random roll.
+    if (context.characterBonus.className === 'mage') {
+      const canUseCardReading = await AbilityService.canUseAbility(userId, guildId, 'mage_card_reading');
+      if (canUseCardReading.success && Math.random() < 0.3) {
+        await AbilityService.useAbility(userId, guildId, 'mage_card_reading');
+        characterAdvice = this.getMageCardAdvice(playerHand, dealerUpCard, deck);
+        bonusInfo = 'mage_card_reading';
+      }
     }
 
     // Rogue card counting simulation

@@ -234,58 +234,16 @@ describe('Character Creation API', () => {
     });
   });
 
-  describe('PUT /api/characters/level-up', () => {
-    it('grants XP and reports a level-up', async () => {
-      (CharacterService.levelUpCharacter as Mock).mockResolvedValue({
-        character: { _id: 'char-123', name: 'TestHero', level: 6 },
-        totalXp: 620,
-        leveledUp: true,
-        oldLevel: 5,
-        newLevel: 6,
-        xpGained: 120,
-      });
-
+  // PUT /api/characters/level-up was removed - it let any authenticated user grant
+  // themselves arbitrary XP via a raw client-supplied `xp` body param. See routes/characters.ts.
+  describe('PUT /api/characters/level-up - removed endpoint', () => {
+    it('should no longer be reachable', async () => {
       const response = await request(app)
         .put('/api/characters/level-up')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ xp: 120 });
 
-      expect(response.status).toBe(200);
-      expect(CharacterService.levelUpCharacter).toHaveBeenCalledWith(testUserId, 'test-guild-456', 120);
-      expect(response.body).toMatchObject({
-        success: true,
-        leveledUp: true,
-        xpGained: 120,
-        character: { id: 'char-123', name: 'TestHero', level: 6, experience: 620 },
-      });
-      expect(response.body.message).toContain('leveled up from 5 to 6');
-    });
-
-    it('grants XP without a level-up message when the threshold is not reached', async () => {
-      (CharacterService.levelUpCharacter as Mock).mockResolvedValue({
-        character: { _id: 'char-123', name: 'TestHero', level: 5 },
-        totalXp: 520,
-        leveledUp: false,
-        xpGained: 20,
-      });
-
-      const response = await request(app)
-        .put('/api/characters/level-up')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ xp: 20 });
-
-      expect(response.status).toBe(200);
-      expect(response.body.leveledUp).toBe(false);
-      expect(response.body.message).toBe('Gained 20 XP');
-    });
-
-    it('rejects a non-positive XP amount', async () => {
-      const response = await request(app)
-        .put('/api/characters/level-up')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ xp: 0 });
-
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(404);
       expect(CharacterService.levelUpCharacter).not.toHaveBeenCalled();
     });
   });

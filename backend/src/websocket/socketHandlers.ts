@@ -71,13 +71,23 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
     socket.on('roulette:place_bet', async (data: { tableId: string; bet: any }) => {
       try {
         const { tableId, bet } = data;
-        // Get characterId from the bet data or session
-        const characterId = bet.characterId || socket.userId || '';
-        
+
+        // characterId must be a real Character ObjectId (RouletteTable.bets.characterId is
+        // a required ObjectId ref) - look it up server-side from the authenticated userId
+        // instead of trusting a client-supplied field, which previously fell back to the
+        // raw Discord snowflake socket.userId and blew up Mongoose's ObjectId cast.
+        const { Character } = await import('../models/database');
+        const character = await Character.findOne({ userId: socket.userId, guildId: socket.guildId }).exec();
+
+        if (!character) {
+          socket.emit('error', { message: 'Create a character before placing bets' });
+          return;
+        }
+
         const result = await RouletteTableManager.placeBet(
           tableId,
           socket.userId!,
-          characterId,
+          (character._id as any).toString(),
           Array.isArray(bet) ? bet : [bet],
           io
         );
@@ -247,9 +257,30 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
     // DISCONNECT HANDLING
     // =====================
 
+    // 'disconnecting' fires while socket.rooms is still populated with the rooms this
+    // socket was in - by the time 'disconnect' fires, Socket.IO has already removed the
+    // socket from all of them, so table cleanup has to happen here instead.
+    socket.on('disconnecting', async () => {
+      // Clean up table membership so a dropped connection doesn't leave a ghost
+      // player occupying a seat / blocking turn order at any table it was part of.
+      for (const room of socket.rooms) {
+        try {
+          if (room.startsWith('roulette:')) {
+            const tableId = room.slice('roulette:'.length);
+            await RouletteTableManager.playerLeave(tableId, socket.userId!, io);
+          } else if (room.startsWith('blackjack:')) {
+            const tableId = room.slice('blackjack:'.length);
+            await BlackjackTableManager.playerLeave(tableId, socket.guildId!, socket.userId!, io);
+          }
+        } catch (error: any) {
+          console.error(`[Socket] Failed to clean up ${socket.userId} from room ${room} on disconnect:`, error);
+        }
+      }
+    });
+
     socket.on('disconnect', async () => {
       console.log(`User ${socket.username} disconnected from casino`);
-      
+
       // Notify rooms about player leaving
       socket.to(socket.guildId!).emit('casino:player_left', {
         username: socket.username,

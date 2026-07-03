@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { AppError } from '../middleware/errorHandler';
 import { EnergyService } from '../services/EnergyService';
 import { ReputationService } from '../services/ReputationService';
 import { AbilityService } from '../services/AbilityService';
@@ -27,27 +26,10 @@ router.get('/energy', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-// POST /api/progression/energy/restore - Restore energy (for admin/special events)
-router.post('/energy/restore', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { userId, guildId } = req.user!;
-    const { amount } = req.body;
-
-    if (!amount || amount < 1) {
-      throw new AppError('Invalid amount', 400);
-    }
-
-    const result = await EnergyService.restoreEnergy(userId, guildId, amount);
-
-    res.json({
-      success: true,
-      message: `Restored ${amount} energy`,
-      energy: result
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+// NOTE: A POST /api/progression/energy/restore endpoint used to live here ("for
+// admin/special events"), letting any authenticated user restore their own energy
+// to full for free with no actual admin/service check. It has been removed. Energy
+// regenerates via EnergyService's normal time-based regen (see EnergyService.getEnergyInfo).
 
 // =====================
 // REPUTATION SYSTEM

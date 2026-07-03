@@ -100,13 +100,37 @@ describe('Auth API E2E Tests', () => {
   });
 
   describe('POST /api/auth/discord - Discord OAuth Authentication', () => {
-    it('should authenticate with direct Discord credentials', async () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    // Mocks the two Discord REST calls the route makes to verify a token:
+    // GET /users/@me (identity) and GET /users/@me/guilds (membership check).
+    function mockDiscordApi(
+      user: { id: string; username: string; global_name?: string },
+      guildIds: string[]
+    ) {
+      global.fetch = vi.fn(async (url: any) => {
+        const href = url.toString();
+        if (href === 'https://discord.com/api/users/@me') {
+          return { ok: true, json: async () => user } as any;
+        }
+        if (href === 'https://discord.com/api/users/@me/guilds') {
+          return { ok: true, json: async () => guildIds.map(id => ({ id })) } as any;
+        }
+        throw new Error(`Unexpected fetch call in test: ${href}`);
+      }) as any;
+    }
+
+    it('should authenticate with a verified Discord token and confirmed guild membership', async () => {
+      mockDiscordApi({ id: 'discord-123', username: 'DiscordUser' }, ['guild-456']);
+
       const response = await request(app)
         .post('/api/auth/discord')
         .send({
-          userId: 'discord-123',
           guildId: 'guild-456',
-          username: 'DiscordUser',
           discordToken: 'mock-discord-token'
         });
 
@@ -123,12 +147,12 @@ describe('Auth API E2E Tests', () => {
     });
 
     it('should generate JWT token without database interaction', async () => {
+      mockDiscordApi({ id: 'new-user', username: 'NewUser' }, ['guild-789']);
+
       const response = await request(app)
         .post('/api/auth/discord')
         .send({
-          userId: 'new-user',
           guildId: 'guild-789',
-          username: 'NewUser',
           discordToken: 'token'
         });
 
@@ -139,23 +163,24 @@ describe('Auth API E2E Tests', () => {
       expect(User.findOne).not.toHaveBeenCalled();
     });
 
-    it('should return JWT token for any valid credentials', async () => {
+    it('should ignore a client-supplied userId and use the verified Discord id instead', async () => {
+      mockDiscordApi({ id: 'real-verified-id', username: 'RealUser' }, ['any-guild']);
+
       const response = await request(app)
         .post('/api/auth/discord')
         .send({
-          userId: 'any-user',
+          userId: 'attacker-supplied-id',
           guildId: 'any-guild',
-          username: 'AnyUser',
+          username: 'AttackerSuppliedUsername',
           discordToken: 'token'
         });
 
       expect(response.status).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.token).toBeDefined();
-      expect(response.body.user.userId).toBe('any-user');
+      expect(response.body.user.userId).toBe('real-verified-id');
+      expect(response.body.user.username).toBe('RealUser');
     });
 
-    it('should require userId and guildId', async () => {
+    it('should require discordToken and guildId', async () => {
       const response = await request(app)
         .post('/api/auth/discord')
         .send({
@@ -163,6 +188,26 @@ describe('Auth API E2E Tests', () => {
         });
 
       expect(response.status).toBe(400);
+    });
+
+    it('should reject an invalid or expired Discord token', async () => {
+      global.fetch = vi.fn(async () => ({ ok: false, text: async () => 'invalid_token' })) as any;
+
+      const response = await request(app)
+        .post('/api/auth/discord')
+        .send({ guildId: 'guild-1', discordToken: 'bad-token' });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('should reject when the caller is not a member of the claimed guild', async () => {
+      mockDiscordApi({ id: 'discord-123', username: 'DiscordUser' }, ['some-other-guild']);
+
+      const response = await request(app)
+        .post('/api/auth/discord')
+        .send({ guildId: 'guild-not-a-member-of', discordToken: 'token' });
+
+      expect(response.status).toBe(401);
     });
   });
 
@@ -192,15 +237,28 @@ describe('Auth API E2E Tests', () => {
     });
 
     it('should complete Discord auth flow with user creation via /me endpoint', async () => {
-      // Step 1: Discord authentication (generates JWT)
+      // Step 1: Discord authentication (generates JWT) - mock the two Discord API
+      // verification calls the route makes (identity + guild membership).
+      const originalFetch = global.fetch;
+      global.fetch = vi.fn(async (url: any) => {
+        const href = url.toString();
+        if (href === 'https://discord.com/api/users/@me') {
+          return { ok: true, json: async () => ({ id: 'flow-user', username: 'FlowUser' }) } as any;
+        }
+        if (href === 'https://discord.com/api/users/@me/guilds') {
+          return { ok: true, json: async () => [{ id: 'flow-guild' }] } as any;
+        }
+        throw new Error(`Unexpected fetch call in test: ${href}`);
+      }) as any;
+
       const authResponse = await request(app)
         .post('/api/auth/discord')
         .send({
-          userId: 'flow-user',
           guildId: 'flow-guild',
-          username: 'FlowUser',
           discordToken: 'mock-token'
         });
+
+      global.fetch = originalFetch;
 
       expect(authResponse.status).toBe(200);
       expect(authResponse.body.token).toBeDefined();

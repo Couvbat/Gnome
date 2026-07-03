@@ -326,7 +326,6 @@ Each ability has a cooldown (minutes before reuse), a session limit (max uses pe
 | `GET /api/quests/history` | Completed quest history |
 | `POST /api/quests/:questId/start` | Start a quest |
 | `POST /api/quests/:questId/abandon` | Abandon a quest |
-| `POST /api/quests/progress` | Update quest progress (used by game engines) |
 | `POST /api/quests/admin/init-daily` | Seed daily quests for a guild |
 | `POST /api/quests/admin/init-story` | Seed story quests for a guild |
 
@@ -354,9 +353,7 @@ GET /api/progression/energy
 { "current": 85, "max": 120, "regenRate": 1.3, "lastRegen": "...", "minutesUntilFull": 27 }
 ```
 
-```http
-POST /api/progression/energy/restore
-```
+Energy otherwise regenerates passively over time via `EnergyService`'s regen calculation - there is no endpoint to restore it on demand.
 
 ### Reputation
 

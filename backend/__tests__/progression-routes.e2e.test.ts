@@ -113,65 +113,17 @@ describe('Progression API E2E Tests', () => {
     });
   });
 
-  describe('POST /api/progression/energy/restore - Energy Restore', () => {
-    it('should restore energy successfully', async () => {
-      const mockResult = {
-        current: 100,
-        max: 100,
-        restored: 50,
-        message: 'Energy restored'
-      };
-
-      (EnergyService.restoreEnergy as Mock).mockResolvedValue(mockResult);
-
+  // POST /api/progression/energy/restore was removed - it let any authenticated user
+  // restore their own energy to full for free with no real admin/service check. See
+  // routes/progression.ts for details.
+  describe('POST /api/progression/energy/restore - removed endpoint', () => {
+    it('should no longer be reachable', async () => {
       const response = await request(app)
         .post('/api/progression/energy/restore')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ amount: 50 });
 
-      expect(response.status).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.message).toContain('Restored 50 energy');
-      expect(response.body.energy.current).toBe(100);
-    });
-
-    it('should cap energy at max', async () => {
-      const mockResult = {
-        current: 100,
-        max: 100,
-        restored: 25, // Only 25 needed to reach max
-        message: 'Energy restored to max'
-      };
-
-      (EnergyService.restoreEnergy as Mock).mockResolvedValue(mockResult);
-
-      const response = await request(app)
-        .post('/api/progression/energy/restore')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ amount: 100 });
-
-      expect(response.status).toBe(200);
-      expect(response.body.energy.current).toBe(100);
-    });
-
-    it('should reject invalid amount', async () => {
-      const response = await request(app)
-        .post('/api/progression/energy/restore')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ amount: 0 });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('Invalid amount');
-    });
-
-    it('should reject negative amount', async () => {
-      const response = await request(app)
-        .post('/api/progression/energy/restore')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ amount: -10 });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('Invalid amount');
+      expect(response.status).toBe(404);
     });
   });
 

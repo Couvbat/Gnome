@@ -8,6 +8,11 @@ import { RouletteEngine } from '../engines/RouletteEngine';
 
 const router = Router();
 
+// Single-player games have no table-configured limits (unlike multiplayer tables, which
+// carry their own minBet/maxBet - see BlackjackTableManager/RouletteTableManager), so we
+// enforce a flat ceiling here, consistent with the default maxBet used across those tables.
+const MAX_BET = 1000;
+
 // =====================
 // ENHANCED SLOTS GAME API
 // =====================
@@ -20,6 +25,10 @@ router.post('/slots/spin', async (req: AuthenticatedRequest, res, next) => {
 
     if (!bet || bet < 10) {
       throw new AppError('Minimum bet is 10 coins', 400);
+    }
+
+    if (bet > MAX_BET) {
+      throw new AppError(`Maximum bet is ${MAX_BET} coins`, 400);
     }
 
     const result = await SlotsEngine.spin(userId, guildId, bet, machineType || 'dragon');
@@ -56,6 +65,10 @@ router.post('/dice/roll', async (req: AuthenticatedRequest, res, next) => {
 
     if (!bet || bet < 10) {
       throw new AppError('Minimum bet is 10 coins', 400);
+    }
+
+    if (bet > MAX_BET) {
+      throw new AppError(`Maximum bet is ${MAX_BET} coins`, 400);
     }
 
     if (!prediction) {
@@ -109,6 +122,10 @@ router.post('/blackjack/play', async (req: AuthenticatedRequest, res, next) => {
 
     if (!bet || bet < 10) {
       throw new AppError('Minimum bet is 10 coins', 400);
+    }
+
+    if (bet > MAX_BET) {
+      throw new AppError(`Maximum bet is ${MAX_BET} coins`, 400);
     }
 
     const result = await BlackjackEngine.playSinglePlayerBlackjack(
@@ -176,6 +193,10 @@ router.post('/roulette/play', async (req: AuthenticatedRequest, res, next) => {
     const totalBet = bets.reduce((sum: number, bet: any) => sum + (bet.amount || 0), 0);
     if (totalBet < 10) {
       throw new AppError('Minimum total bet is 10 coins', 400);
+    }
+
+    if (totalBet > MAX_BET) {
+      throw new AppError(`Maximum total bet is ${MAX_BET} coins`, 400);
     }
 
     const result = await RouletteEngine.playSinglePlayerRoulette(userId, guildId, bets);

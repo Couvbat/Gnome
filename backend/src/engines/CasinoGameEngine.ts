@@ -113,9 +113,24 @@ export class CasinoGameEngine {
     const context = await this.getPlayerContext(userId, guildId);
     const { character, casinoProfile } = context;
 
-    // Update user balance
+    // Charge the bet atomically upfront - the { coins: { $gte: amount } } filter inside
+    // spendCoins rejects the whole game (before any XP/profile/log side effects below are
+    // persisted) if the player can't actually afford it, mirroring the pattern used by
+    // BlackjackTableManager.placeBet for multiplayer tables.
+    const spent = await EconomyService.spendCoins(userId, guildId, bet);
+    if (!spent) {
+      throw new AppError('Insufficient balance to place this bet', 400);
+    }
+
+    // Credit back any winnings/refund. finalPayout already represents the full amount
+    // owed to the player for this round (e.g. bet returned on a push, reduced-loss refund
+    // from a Rogue/Paladin ability, or bet + winnings on a win) - not just the delta.
+    if (result.finalPayout > 0) {
+      await EconomyService.addCoins(userId, guildId, result.finalPayout);
+    }
+
     const netChange = result.finalPayout - bet;
-    const newBalance = await EconomyService.addCoins(userId, guildId, netChange);
+    const newBalance = await EconomyService.getCoins(userId, guildId);
 
     // Award XP to character
     if (character && result.xpGained > 0) {

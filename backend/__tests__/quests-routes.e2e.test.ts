@@ -294,91 +294,20 @@ describe('Quests API E2E Tests', () => {
   });
 
   // =====================
-  // QUEST PROGRESS TESTS
+  // QUEST PROGRESS (removed)
   // =====================
-  describe('POST /api/quests/progress - Update Quest Progress', () => {
-    it('should update quest progress', async () => {
-      const mockResult = {
-        questsUpdated: ['quest-1', 'quest-2'],
-        questsCompleted: []
-      };
-
-      (QuestService.updateQuestProgress as Mock).mockResolvedValue(mockResult);
-
+  // POST /api/quests/progress was removed - it was reachable by any authenticated
+  // user and let them complete quests instantly by POSTing arbitrary progress. See
+  // routes/quests.ts for details. It now 404s (still 401 without/with a bad token,
+  // since authMiddleware is mounted ahead of the router - see the auth tests below).
+  describe('POST /api/quests/progress - removed endpoint', () => {
+    it('should no longer be reachable', async () => {
       const response = await request(app)
         .post('/api/quests/progress')
         .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          type: 'win',
-          target: 'blackjack',
-          amount: 1
-        });
+        .send({ type: 'win', amount: 1 });
 
-      expect(response.status).toBe(200);
-      expect(response.body.success).toBe(true);
-      expect(response.body.questsUpdated).toHaveLength(2);
-      expect(response.body.message).toContain('Quest progress updated');
-    });
-
-    it('should notify when quest is completed', async () => {
-      const mockResult = {
-        questsUpdated: ['quest-1'],
-        questsCompleted: [{ id: 'quest-1', title: 'First Win', rewards: { coins: 100 } }]
-      };
-
-      (QuestService.updateQuestProgress as Mock).mockResolvedValue(mockResult);
-
-      const response = await request(app)
-        .post('/api/quests/progress')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          type: 'win',
-          amount: 1
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body.questsCompleted).toHaveLength(1);
-      expect(response.body.message).toContain('1 quest(s) completed');
-    });
-
-    it('should handle no active quests affected', async () => {
-      const mockResult = {
-        questsUpdated: [],
-        questsCompleted: []
-      };
-
-      (QuestService.updateQuestProgress as Mock).mockResolvedValue(mockResult);
-
-      const response = await request(app)
-        .post('/api/quests/progress')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          type: 'wager',
-          amount: 100
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body.message).toContain('No active quests affected');
-    });
-
-    it('should reject missing type', async () => {
-      const response = await request(app)
-        .post('/api/quests/progress')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ amount: 100 });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('Missing type or amount');
-    });
-
-    it('should reject missing amount', async () => {
-      const response = await request(app)
-        .post('/api/quests/progress')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ type: 'win' });
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('Missing type or amount');
+      expect(response.status).toBe(404);
     });
   });
 
@@ -510,7 +439,11 @@ describe('Quests API E2E Tests', () => {
 
       expect(activeResponse.body.quests).toHaveLength(1);
 
-      // Step 4: Update progress (win a game)
+      // Step 4: Update progress (win a game). This used to go through
+      // POST /api/quests/progress, which was removed (see routes/quests.ts) - it let
+      // any authenticated user complete quests instantly by POSTing arbitrary progress.
+      // Progress is now only ever reported by game engines calling
+      // QuestService.updateQuestProgress() in-process, which is what this simulates.
       const progressResult = {
         questsUpdated: ['quest-workflow'],
         questsCompleted: [{ id: 'quest-workflow', title: 'Quick Win', rewards: { coins: 50 } }]
@@ -518,14 +451,12 @@ describe('Quests API E2E Tests', () => {
 
       (QuestService.updateQuestProgress as Mock).mockResolvedValue(progressResult);
 
-      const progressResponse = await request(app)
-        .post('/api/quests/progress')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ type: 'win', amount: 1 });
+      const progress = await QuestService.updateQuestProgress(testUserId, testGuildId, {
+        type: 'win',
+        amount: 1
+      });
 
-      expect(progressResponse.status).toBe(200);
-      expect(progressResponse.body.questsCompleted).toHaveLength(1);
-      expect(progressResponse.body.message).toContain('completed');
+      expect(progress.questsCompleted).toHaveLength(1);
 
       // Step 5: Check history for completed quest
       const history = [

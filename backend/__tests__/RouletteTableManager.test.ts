@@ -3,6 +3,7 @@ import type { Mock } from 'vitest';
 import { RouletteTableManager } from '../src/managers/RouletteTableManager';
 import { RouletteEngine } from '../src/engines/RouletteEngine';
 import { RouletteTable } from '../src/models/schemas';
+import { EconomyService } from '../src/services/EconomyService';
 
 // Mock dependencies
 vi.mock('../src/engines/RouletteEngine');
@@ -14,6 +15,7 @@ vi.mock('../src/models/schemas', () => ({
   }
 }));
 vi.mock('../src/services/BardAbilities');
+vi.mock('../src/services/EconomyService');
 
 describe('RouletteTableManager', () => {
   const mockTableId = 'roulette123';
@@ -26,7 +28,7 @@ describe('RouletteTableManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    
+
     // Clear internal locks (access via any to bypass private)
     (RouletteTableManager as any).locks?.clear?.();
 
@@ -35,6 +37,11 @@ describe('RouletteTableManager', () => {
       to: vi.fn().mockReturnThis(),
       emit: vi.fn()
     };
+
+    // Bets are charged/refunded atomically through EconomyService - default to
+    // "player can afford it" unless a specific test needs otherwise.
+    (EconomyService.spendCoins as Mock).mockResolvedValue(true);
+    (EconomyService.addCoins as Mock).mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -294,6 +301,97 @@ describe('RouletteTableManager', () => {
         })
       );
     });
+
+    it('should charge the bet atomically and reject if the player cannot afford it', async () => {
+      const mockTable = {
+        tableId: mockTableId,
+        guildId: mockGuildId,
+        minBet: 10,
+        maxBet: 1000,
+        gamePhase: 'betting',
+        bets: [],
+        activePlayers: [],
+        save: vi.fn().mockResolvedValue(true)
+      };
+
+      (RouletteTable.findOne as Mock).mockResolvedValue(mockTable);
+      (EconomyService.spendCoins as Mock).mockResolvedValue(false);
+
+      const result = await RouletteTableManager.placeBet(
+        mockTableId,
+        mockUserId,
+        mockCharacterId,
+        [{ type: 'red', amount: 100 }],
+        mockIo
+      );
+
+      expect(EconomyService.spendCoins).toHaveBeenCalledWith(mockUserId, mockGuildId, 100);
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Insufficient balance');
+      // The bet must not be recorded if the charge failed
+      expect(mockTable.bets).toHaveLength(0);
+    });
+
+    it('should only charge the incremental difference when a player revises their bet', async () => {
+      const mockTable = {
+        tableId: mockTableId,
+        guildId: mockGuildId,
+        minBet: 10,
+        maxBet: 1000,
+        gamePhase: 'betting',
+        bets: [{
+          userId: mockUserId,
+          bets: [{ type: 'red', amount: 50 }],
+          totalWagered: 50
+        }],
+        activePlayers: [mockUserId],
+        save: vi.fn().mockResolvedValue(true)
+      };
+
+      (RouletteTable.findOne as Mock).mockResolvedValue(mockTable);
+
+      await RouletteTableManager.placeBet(
+        mockTableId,
+        mockUserId,
+        mockCharacterId,
+        [{ type: 'black', amount: 100 }],
+        mockIo
+      );
+
+      // Only the extra 50 (100 - 50 already staked) should be charged
+      expect(EconomyService.spendCoins).toHaveBeenCalledWith(mockUserId, mockGuildId, 50);
+      expect(EconomyService.addCoins).not.toHaveBeenCalled();
+    });
+
+    it('should refund the difference when a player lowers their bet', async () => {
+      const mockTable = {
+        tableId: mockTableId,
+        guildId: mockGuildId,
+        minBet: 10,
+        maxBet: 1000,
+        gamePhase: 'betting',
+        bets: [{
+          userId: mockUserId,
+          bets: [{ type: 'red', amount: 100 }],
+          totalWagered: 100
+        }],
+        activePlayers: [mockUserId],
+        save: vi.fn().mockResolvedValue(true)
+      };
+
+      (RouletteTable.findOne as Mock).mockResolvedValue(mockTable);
+
+      await RouletteTableManager.placeBet(
+        mockTableId,
+        mockUserId,
+        mockCharacterId,
+        [{ type: 'black', amount: 40 }],
+        mockIo
+      );
+
+      expect(EconomyService.addCoins).toHaveBeenCalledWith(mockUserId, mockGuildId, 60);
+      expect(EconomyService.spendCoins).not.toHaveBeenCalled();
+    });
   });
 
   describe('startBettingRound', () => {
@@ -433,6 +531,24 @@ describe('RouletteTableManager', () => {
 
       await RouletteTableManager.playerLeave(mockTableId, mockUserId, mockIo);
 
+      expect(mockTable.bets).toHaveLength(0);
+    });
+
+    it('should refund the deducted bet through the shared economy on leave', async () => {
+      const mockTable = {
+        tableId: mockTableId,
+        guildId: mockGuildId,
+        activePlayers: [mockUserId],
+        bets: [{ userId: mockUserId, bets: [{ type: 'red', amount: 100 }], totalWagered: 100 }],
+        gamePhase: 'betting',
+        save: vi.fn().mockResolvedValue(true)
+      };
+
+      (RouletteTable.findOne as Mock).mockResolvedValue(mockTable);
+
+      await RouletteTableManager.playerLeave(mockTableId, mockUserId, mockIo);
+
+      expect(EconomyService.addCoins).toHaveBeenCalledWith(mockUserId, mockGuildId, 100);
       expect(mockTable.bets).toHaveLength(0);
     });
 

@@ -22,7 +22,8 @@ router.post('/dev', async (req: Request, res: Response, next: NextFunction) => {
     const userId = 'dev-user-demo'; // Fixed demo user ID
     const guildId = 'dev-guild';
 
-    const jwtSecret = process.env.JWT_SECRET || 'gnome-casino-secret';
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
     const token = jwt.sign(
       {
         userId,
@@ -53,10 +54,11 @@ router.post('/dev', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// POST /api/auth/discord - Exchange Discord OAuth code for access token (for Discord Activity)
+// POST /api/auth/discord - Exchange Discord OAuth code for access token (for Discord Activity),
+// or exchange a verified Discord access token for our own session JWT.
 router.post('/discord', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { code, discordToken, userId, guildId, username } = req.body;
+    const { code, discordToken, guildId } = req.body;
 
     // Handle OAuth code exchange for Discord Activity
     if (code) {
@@ -106,20 +108,52 @@ router.post('/discord', async (req: Request, res: Response, next: NextFunction) 
       return;
     }
 
-    // Legacy flow: Direct token authentication
-    if (!discordToken || !userId || !guildId) {
+    // Direct token authentication: the client supplies a Discord OAuth access token
+    // (obtained via the `code` exchange above, or Discord's SDK) plus the guild
+    // context. The token is verified against Discord's API below - userId is always
+    // derived from that verified response, never trusted from client-supplied fields.
+    if (!discordToken || !guildId) {
       throw new AppError('Missing required fields', 400);
     }
 
-    // In a real implementation, you would validate the Discord token
-    // For now, we'll create a JWT token with the provided info
-    const jwtSecret = process.env.JWT_SECRET || 'gnome-casino-secret';
+    const discordUserResponse = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${discordToken}` }
+    });
+
+    if (!discordUserResponse.ok) {
+      throw new AppError('Invalid or expired Discord token', 401);
+    }
+
+    const discordUser = await discordUserResponse.json() as {
+      id: string;
+      username: string;
+      global_name?: string;
+    };
+
+    // Verify the caller is actually a member of the guild they're claiming - the
+    // access token itself carries no guild context, so this prevents an attacker
+    // from pointing an otherwise-valid token at an arbitrary guild's economy.
+    const guildsResponse = await fetch('https://discord.com/api/users/@me/guilds', {
+      headers: { Authorization: `Bearer ${discordToken}` }
+    });
+
+    if (!guildsResponse.ok) {
+      throw new AppError('Unable to verify guild membership (missing "guilds" scope?)', 401);
+    }
+
+    const guilds = await guildsResponse.json() as Array<{ id: string }>;
+    if (!guilds.some(g => g.id === guildId)) {
+      throw new AppError('You are not a member of the specified guild', 401);
+    }
+
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
     const token = jwt.sign(
       {
-        userId,
+        userId: discordUser.id,
         guildId,
-        discordId: userId,
-        username: username || 'Discord User'
+        discordId: discordUser.id,
+        username: discordUser.global_name || discordUser.username
       },
       jwtSecret,
       { expiresIn: '7d' }
@@ -130,9 +164,9 @@ router.post('/discord', async (req: Request, res: Response, next: NextFunction) 
       message: 'Authentication successful',
       token,
       user: {
-        userId,
+        userId: discordUser.id,
         guildId,
-        username: username || 'Discord User'
+        username: discordUser.global_name || discordUser.username
       }
     });
   } catch (error) {
@@ -149,7 +183,8 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new AppError('Refresh token required', 400);
     }
 
-    const jwtSecret = process.env.JWT_SECRET || 'gnome-casino-secret';
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
     const decoded = jwt.verify(refreshToken, jwtSecret) as any;
 
     const newToken = jwt.sign(
@@ -185,7 +220,8 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
       throw new AppError('Access token required', 401);
     }
 
-    const jwtSecret = process.env.JWT_SECRET || 'gnome-casino-secret';
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
     const decoded = jwt.verify(token, jwtSecret) as any;
 
     // Fetch user from database

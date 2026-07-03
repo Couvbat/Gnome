@@ -45,7 +45,8 @@ This directory contains comprehensive end-to-end (E2E) tests for the Gnome Casin
 
 5. **`progression-routes.e2e.test.ts`** - Progression system API tests
    - Energy status (`/api/progression/energy`)
-   - Energy restoration (`/api/progression/energy/restore`)
+   - Confirms `/api/progression/energy/restore` was removed (404) - it let any
+     authenticated user restore their own energy for free
    - Reputation status (`/api/progression/reputation`)
    - Reputation tiers (`/api/progression/reputation/tiers`)
    - Reputation bonuses (`/api/progression/reputation/bonuses`)
@@ -61,7 +62,8 @@ This directory contains comprehensive end-to-end (E2E) tests for the Gnome Casin
    - Quest history (`/api/quests/history`)
    - Start quest (`/api/quests/:questId/start`)
    - Abandon quest (`/api/quests/:questId/abandon`)
-   - Update quest progress (`/api/quests/progress`)
+   - Confirms `/api/quests/progress` was removed (404) - it let any authenticated
+     user complete quests instantly by POSTing arbitrary progress
    - Admin: Initialize daily quests (`/api/quests/admin/init-daily`)
    - Admin: Initialize story quests (`/api/quests/admin/init-story`)
    - Complete quest workflow (browse → start → progress → complete)

@@ -158,36 +158,11 @@ router.get('/me', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-// PUT /api/characters/level-up - Level up character (for testing or admin use)
-router.put('/level-up', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { userId, guildId } = req.user!;
-    const { xp } = req.body;
-
-    if (!xp || xp < 1) {
-      throw new AppError('XP amount must be positive', 400);
-    }
-
-    const result = await CharacterService.levelUpCharacter(userId, guildId, xp);
-
-    res.json({
-      success: true,
-      message: result.leveledUp
-        ? `Character leveled up from ${result.oldLevel} to ${result.newLevel}!`
-        : `Gained ${result.xpGained} XP`,
-      character: {
-        id: result.character._id,
-        name: (result.character as any).name,
-        level: result.character.level,
-        experience: result.totalXp
-      },
-      leveledUp: result.leveledUp,
-      xpGained: result.xpGained
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+// NOTE: A PUT /api/characters/level-up endpoint used to live here ("for testing or
+// admin use"), letting any authenticated user grant themselves arbitrary XP via a
+// raw client-supplied `xp` body param. It has been removed. XP is awarded by game
+// engines calling CharacterService.levelUpCharacter() in-process as part of actual
+// game outcomes (see engines/CasinoGameEngine.ts, engines/BlackjackEngine.ts).
 
 // DELETE /api/characters/me - Delete current character
 router.delete('/me', async (req: AuthenticatedRequest, res, next) => {
@@ -312,7 +287,10 @@ router.get('/search', async (req: AuthenticatedRequest, res, next) => {
     let query: any = { guildId };
 
     if (name) {
-      query.name = new RegExp(name as string, 'i');
+      // Escape regex metacharacters so user input can't build an expensive/malicious
+      // pattern (ReDoS) - this is a substring search, not a regex search.
+      const escapedName = (name as string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.name = new RegExp(escapedName, 'i');
     }
 
     if (className) {

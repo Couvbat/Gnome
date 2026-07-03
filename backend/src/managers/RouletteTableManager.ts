@@ -2,7 +2,7 @@ import { RouletteTable } from '../models/schemas';
 import { RouletteEngine } from '../engines/RouletteEngine';
 import { BardAbilities } from '../services/BardAbilities';
 import type { Server as SocketIOServer } from 'socket.io';
-import { User } from '../models/database';
+import { EconomyService } from '../services/EconomyService';
 
 /**
  * RouletteTableManager
@@ -129,7 +129,7 @@ export class RouletteTableManager {
 
       // Validate bets
       const totalWagered = bets.reduce((sum, bet) => sum + bet.amount, 0);
-      
+
       if (totalWagered < tableDoc.minBet) {
         return { success: false, message: `Minimum bet is ${tableDoc.minBet}` };
       }
@@ -140,7 +140,24 @@ export class RouletteTableManager {
 
       // Find existing player bet or create new
       let playerBet = tableDoc.bets.find((b: any) => b.userId === userId);
-      
+
+      // Charge the bet atomically now (rejecting if the player can't afford it), same
+      // pattern as BlackjackTableManager.placeBet - previously this table only moved
+      // money at spin resolution, so a player could bet money they didn't have. Players
+      // may revise their bet before the spin, so we only charge/refund the difference
+      // against whatever they've already staked this round.
+      const previousWagered = playerBet ? playerBet.totalWagered : 0;
+      const delta = totalWagered - previousWagered;
+
+      if (delta > 0) {
+        const spent = await EconomyService.spendCoins(userId, tableDoc.guildId, delta);
+        if (!spent) {
+          return { success: false, message: 'Insufficient balance' };
+        }
+      } else if (delta < 0) {
+        await EconomyService.addCoins(userId, tableDoc.guildId, -delta);
+      }
+
       if (playerBet) {
         // Update existing bet
         playerBet.bets = bets;
@@ -286,15 +303,15 @@ export class RouletteTableManager {
 
       // Remove their bets if in betting phase and refund deducted coins
       if (tableDoc.gamePhase === 'betting') {
-        const playerBets: Array<{ userId: string; amount: number }> = tableDoc.bets.filter(
+        const playerBets: Array<{ userId: string; totalWagered: number }> = tableDoc.bets.filter(
           (b: any) => b.userId === userId
         );
-        const refundAmount = playerBets.reduce((sum, b) => sum + b.amount, 0);
+        const refundAmount = playerBets.reduce((sum, b) => sum + (b.totalWagered || 0), 0);
         if (refundAmount > 0) {
-          await User.findOneAndUpdate(
-            { userId },
-            { $inc: { coins: refundAmount } }
-          );
+          // Refund through the shared economy (same collection/atomic pattern the bot
+          // and BlackjackTableManager use) - the User model has no `coins` field, and
+          // this update was previously missing the guildId scope too.
+          await EconomyService.addCoins(userId, tableDoc.guildId, refundAmount);
         }
         tableDoc.bets = tableDoc.bets.filter((b: any) => b.userId !== userId);
       }

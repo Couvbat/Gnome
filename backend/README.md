@@ -104,7 +104,7 @@ All routes except `/api/auth/*` and `GET /health` require a JWT bearer token, va
 | Method | Path | Description |
 |---|---|---|
 | POST | `/dev` | Development-only login (disabled when `NODE_ENV=production`) |
-| POST | `/discord` | Discord OAuth code exchange |
+| POST | `/discord` | Discord OAuth code exchange, or (with `discordToken` + `guildId`) verified-token login: the token is checked against Discord's API and guild membership before a JWT is issued |
 | POST | `/refresh` | Refresh a JWT |
 | GET | `/me` | Current user info; auto-creates the user record on first call |
 
@@ -116,7 +116,6 @@ All routes except `/api/auth/*` and `GET /health` require a JWT bearer token, va
 | GET | `/classes/:className` | Details for one class |
 | POST | `/create` | Create a character |
 | GET | `/me` | Current user's character |
-| PUT | `/level-up` | Manually grant XP / level up |
 | DELETE | `/me` | Delete the current character |
 | GET | `/:characterId/stats` | Detailed stats for a character |
 | GET | `/leaderboard` | Character leaderboard by level/XP |
@@ -160,7 +159,6 @@ All routes except `/api/auth/*` and `GET /health` require a JWT bearer token, va
 | Method | Path | Description |
 |---|---|---|
 | GET | `/energy` | Current energy status |
-| POST | `/energy/restore` | Manually restore energy |
 | GET | `/reputation` | Current reputation tier and points |
 | GET | `/reputation/tiers` | All tier definitions |
 | GET | `/reputation/bonuses` | Bonuses for the current tier |
@@ -177,7 +175,6 @@ All routes except `/api/auth/*` and `GET /health` require a JWT bearer token, va
 | GET | `/history` | Completed quest history |
 | POST | `/:questId/start` | Start a quest |
 | POST | `/:questId/abandon` | Abandon a quest |
-| POST | `/progress` | Update quest progress (used internally by game engines) |
 | POST | `/admin/init-daily` | Seed daily quests for the guild |
 | POST | `/admin/init-story` | Seed story quests for the guild |
 
