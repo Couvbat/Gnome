@@ -17,9 +17,15 @@ const error = ref<string | null>(null);
 onMounted(async () => {
   const isDevMode =
     import.meta.env.VITE_DEV_MODE === 'true' || import.meta.env.MODE === 'development';
-  if (isDevMode) {
+  // Require an explicit opt-in (?devReset=true) on top of dev mode, so this
+  // doesn't fire on every mount of this component - including the case where
+  // we land here because a transient fetch failure returned null rather than
+  // there genuinely being no character, which would otherwise silently wipe
+  // a real character for the user.
+  const wantsDevReset = new URLSearchParams(window.location.search).get('devReset') === 'true';
+  if (isDevMode && wantsDevReset) {
     try { await apiService.deleteCharacter(); }
-    catch { /* ignore */ }
+    catch (e) { console.error('[CharacterCreation] Dev reset failed:', e); }
   }
 });
 

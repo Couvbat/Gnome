@@ -44,7 +44,12 @@ export function useEnergy(refreshInterval = 1000, fetchInterval = 60000) {
       minutesUntilFull:
         newCurrent >= baseEnergy.max
           ? 0
-          : Math.ceil((baseEnergy.max - newCurrent) / baseEnergy.regenRate),
+          // regenRate <= 0 means "not regenerating" - dividing by it produced
+          // Infinity. Fall back to the last value the backend itself reported
+          // rather than presenting an infinite/nonsensical estimate.
+          : baseEnergy.regenRate > 0
+            ? Math.ceil((baseEnergy.max - newCurrent) / baseEnergy.regenRate)
+            : baseEnergy.minutesUntilFull,
     };
   };
 

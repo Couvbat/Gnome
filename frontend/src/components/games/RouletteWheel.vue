@@ -31,10 +31,23 @@ const betAmount = ref(10);
 const userBalance = ref(0);
 const otherPlayers = ref<Map<string, PlayerBet>>(new Map());
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+// Snapshot of `bets` right before the most recent optimistic update, so a
+// server rejection (the generic 'error' event) can roll the local state back
+// instead of leaving a bet displayed that the server never accepted.
+let previousBetsSnapshot: Record<string, number> | null = null;
+
+const balanceError = ref(false);
 
 async function fetchBalance() {
-  try { const user = await apiService.getCurrentUser(); userBalance.value = user.coins; currentUserId.value = user.id; }
-  catch (e) { console.error('Failed to fetch balance:', e); }
+  try {
+    const user = await apiService.getCurrentUser();
+    userBalance.value = user.coins;
+    currentUserId.value = user.id;
+    balanceError.value = false;
+  } catch (e) {
+    console.error('Failed to fetch balance:', e);
+    balanceError.value = true;
+  }
 }
 
 function startCountdown(seconds: number) {
@@ -67,6 +80,7 @@ function handleTableState(data: { gamePhase: string; timeRemaining: number } | n
 function handleBettingOpened(data: { timeRemaining: number }) {
   gamePhase.value = 'betting';
   bets.value = {};
+  previousBetsSnapshot = null;
   otherPlayers.value = new Map();
   result.value = null;
   resultMessage.value = null;
@@ -118,7 +132,21 @@ function handlePlayerLeft(data: { userId: string }) {
   otherPlayers.value = updated;
 }
 
+// Server ack for our own bet placement ('roulette:bet_placed' is sent only to
+// the placing socket). Once confirmed, the pre-bet snapshot must be discarded
+// so a later, unrelated error can't roll back a bet the server has accepted.
+function handleBetConfirmed() {
+  previousBetsSnapshot = null;
+}
+
 function handleError(data: { message: string }) {
+  // Bets are applied optimistically (placeBet/clearBets below) before the
+  // server confirms them. On rejection, roll back to the snapshot taken right
+  // before that optimistic update instead of leaving a phantom bet on screen.
+  if (previousBetsSnapshot) {
+    bets.value = previousBetsSnapshot;
+    previousBetsSnapshot = null;
+  }
   alert(data.message);
 }
 
@@ -128,6 +156,7 @@ onMounted(async () => {
     wsService.on('roulette:table_state', handleTableState);
     wsService.on('roulette:betting_opened', handleBettingOpened);
     wsService.on('roulette:betting_closing', handleBettingClosing);
+    wsService.on('roulette:bet_placed', handleBetConfirmed);
     wsService.on('roulette:player_bet', handlePlayerBet);
     wsService.on('roulette:betting_closed', handleBettingClosed);
     wsService.on('roulette:spin_started', handleSpinStarted);
@@ -146,6 +175,7 @@ onUnmounted(() => {
   wsService.off('roulette:table_state', handleTableState);
   wsService.off('roulette:betting_opened', handleBettingOpened);
   wsService.off('roulette:betting_closing', handleBettingClosing);
+  wsService.off('roulette:bet_placed', handleBetConfirmed);
   wsService.off('roulette:player_bet', handlePlayerBet);
   wsService.off('roulette:betting_closed', handleBettingClosed);
   wsService.off('roulette:spin_started', handleSpinStarted);
@@ -159,6 +189,7 @@ function placeBet(position: string, amount: number) {
   if (gamePhase.value !== 'betting') return;
   const totalBets = Object.values(bets.value).reduce((a, b) => a + b, 0);
   if (totalBets + amount > userBalance.value) { alert('Fonds insuffisants!'); return; }
+  previousBetsSnapshot = { ...bets.value };
   bets.value = { ...bets.value, [position]: (bets.value[position] || 0) + amount };
   sendBets();
 }
@@ -167,6 +198,7 @@ function handleNumberClick(num: number) { placeBet(`number-${num}`, betAmount.va
 function handleSpecialBet(betType: RouletteBetType, amount: number) { placeBet(betType, amount); }
 
 function clearBets() {
+  previousBetsSnapshot = { ...bets.value };
   bets.value = {};
   sendBets();
 }
@@ -221,6 +253,11 @@ const resultColorLabel = computed(() => {
         <Badge variant="success" size="md">💰 {{ userBalance }}</Badge>
       </template>
     </GameHeader>
+
+    <div v-if="balanceError" class="mb-4 px-4 py-3 bg-red-500/15 border border-red-500/40 rounded-xl text-red-400 text-center text-sm">
+      Impossible de récupérer votre solde.
+      <button class="underline font-semibold ml-1" @click="fetchBalance">Réessayer</button>
+    </div>
 
     <Card variant="glass" class="mb-6 text-center">
       <p v-if="gamePhase === 'betting'" class="text-xl font-bold text-gnome-gold">

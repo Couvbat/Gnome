@@ -13,6 +13,9 @@ const mockAxiosInstance = {
     request: {
       use: vi.fn(),
     },
+    response: {
+      use: vi.fn(),
+    },
   },
 };
 
@@ -87,7 +90,7 @@ describe('ApiService', () => {
       });
 
       const { apiService } = await import('../services/api');
-      const result = await apiService.getCharacter('user-1');
+      const result = await apiService.getMyCharacter();
 
       expect(mockAxiosInstance.get).toHaveBeenCalledWith('/characters/me');
       expect(result?.id).toBe('char-1');
@@ -99,7 +102,7 @@ describe('ApiService', () => {
       });
 
       const { apiService } = await import('../services/api');
-      const result = await apiService.getCharacter('user-1');
+      const result = await apiService.getMyCharacter();
 
       expect(result).toBeNull();
     });
@@ -111,7 +114,7 @@ describe('ApiService', () => {
       vi.mocked(axios.isAxiosError).mockReturnValue(true);
 
       const { apiService } = await import('../services/api');
-      const result = await apiService.getCharacter('user-1');
+      const result = await apiService.getMyCharacter();
 
       expect(result).toBeNull();
     });

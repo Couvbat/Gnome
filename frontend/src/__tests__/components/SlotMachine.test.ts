@@ -127,4 +127,21 @@ describe('SlotMachine', () => {
 
     expect(wrapper.emitted('leave')).toBeTruthy();
   });
+
+  it('does not fire the backend spin call if unmounted mid-animation', async () => {
+    const wrapper = mount(SlotMachine);
+    await flushPromises();
+
+    await wrapper.find('button.py-6').trigger('click');
+    // Unmount partway through the 15-tick reel animation, before spinBackend() would fire.
+    await vi.advanceTimersByTimeAsync(500);
+    wrapper.unmount();
+
+    // Let the remaining animation ticks elapse - the interval must be cleared
+    // by onUnmounted, otherwise this would still call spinSlots on a torn-down component.
+    await vi.advanceTimersByTimeAsync(1200);
+    await flushPromises();
+
+    expect(apiService.spinSlots).not.toHaveBeenCalled();
+  });
 });

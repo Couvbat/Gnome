@@ -63,12 +63,69 @@ let currentUser: DiscordUser | null = null;
 let currentChannel: ChannelInfo | null = null;
 let currentGuild: GuildInfo | null = null;
 let voiceParticipants: VoiceChannelParticipant[] = [];
+// Our own backend session JWT, obtained by exchanging the verified Discord
+// access token via POST /api/auth/discord. Populated only for a real Discord
+// Activity - the mock/dev path has no backend session of its own, callers
+// should fall back to apiService.devLogin() in that case.
+let authToken: string | null = null;
+// Tracks an in-flight initialization so concurrent callers (App.vue plus every
+// useDiscordSdk() consumer mounted at once, e.g. VoiceParticipants) share the
+// same run instead of each re-triggering the OAuth flow and re-subscribing to
+// voice events with no unsubscribe of the prior set.
+let initPromise: Promise<boolean> | null = null;
 
 /**
- * Initialize the Discord SDK
- * Must be called before any other SDK functions
+ * Race a promise against a timeout, rejecting with a clear error if it doesn't
+ * settle in time. Used for Discord SDK RPC calls that can otherwise hang the
+ * app on a stalled RPC channel with no feedback to the user.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000} seconds`)), ms)
+  );
+  return Promise.race([promise, timeoutPromise]);
+}
+
+/**
+ * Whether the app is running as a genuine Discord Activity (embedded iframe
+ * with a frame_id), as opposed to local browser development where a mock SDK
+ * is used. Callers deciding between the real auth flow and dev login should
+ * gate on this, not on isDiscordSdkReady() (which is also true for the mock).
+ */
+export function isRunningInDiscordActivity(): boolean {
+  return isEmbedded;
+}
+
+/**
+ * Get the backend session JWT obtained from the real Discord OAuth exchange.
+ * Only set after a successful initializeDiscordSdk() call while running as a
+ * real Discord Activity - null otherwise (mock/dev mode, or auth failure).
+ */
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+/**
+ * Initialize the Discord SDK.
+ * Must be called before any other SDK functions.
+ * Idempotent: once successfully initialized, subsequent calls short-circuit
+ * and return the cached result instead of re-running OAuth / re-subscribing.
+ * Concurrent callers share the same in-flight promise.
  */
 export async function initializeDiscordSdk(): Promise<boolean> {
+  if (isReady) return true;
+  if (initPromise) return initPromise;
+
+  initPromise = doInitializeDiscordSdk();
+  const result = await initPromise;
+  if (!result) {
+    // Don't permanently cache a failure - allow a genuine retry later.
+    initPromise = null;
+  }
+  return result;
+}
+
+async function doInitializeDiscordSdk(): Promise<boolean> {
   try {
     // Check if running in Discord iframe
     if (!isEmbedded) {
@@ -112,12 +169,7 @@ export async function initializeDiscordSdk(): Promise<boolean> {
     
     // Wait for SDK to be ready with timeout
     console.log('[DiscordSDK] Waiting for SDK ready...');
-    const readyPromise = discordSdk.ready();
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Discord SDK ready() timed out after 10 seconds')), 10000)
-    );
-    
-    await Promise.race([readyPromise, timeoutPromise]);
+    await withTimeout(discordSdk.ready(), 10000, 'Discord SDK ready()');
     isReady = true;
     console.log('[DiscordSDK] SDK ready!');
 
@@ -127,17 +179,21 @@ export async function initializeDiscordSdk(): Promise<boolean> {
 
     // Authenticate with Discord - note: for Activities, redirect_uri is handled by Discord
     console.log('[DiscordSDK] Starting authorization...');
-    const { code } = await discordSdk.commands.authorize({
-      client_id: DISCORD_CLIENT_ID,
-      response_type: 'code',
-      state: stateValue,
-      prompt: 'none',
-      scope: [
-        'identify',
-        'guilds',
-        'rpc.voice.read'
-      ]
-    });
+    const { code } = await withTimeout(
+      discordSdk.commands.authorize({
+        client_id: DISCORD_CLIENT_ID,
+        response_type: 'code',
+        state: stateValue,
+        prompt: 'none',
+        scope: [
+          'identify',
+          'guilds',
+          'rpc.voice.read'
+        ]
+      }),
+      10000,
+      'Discord authorize()'
+    );
     console.log('[DiscordSDK] Authorization successful, got code');
 
     // Exchange code for access token via backend (state is verified by Discord's OAuth flow)
@@ -154,8 +210,12 @@ export async function initializeDiscordSdk(): Promise<boolean> {
     const { access_token } = await response.json();
 
     // Authenticate SDK with access token
-    const authResult = await discordSdk.commands.authenticate({ access_token });
-    
+    const authResult = await withTimeout(
+      discordSdk.commands.authenticate({ access_token }),
+      10000,
+      'Discord authenticate()'
+    );
+
     if (authResult?.user) {
       // Map Discord API user to our DiscordUser type
       const apiUser = authResult.user;
@@ -170,34 +230,78 @@ export async function initializeDiscordSdk(): Promise<boolean> {
       console.log('[DiscordSDK] Authenticated as:', currentUser.username);
     }
 
+    // Exchange the verified Discord access token for our own backend session JWT.
+    // The backend re-validates the token against Discord's API and confirms guild
+    // membership (backend/src/routes/auth.ts POST /discord with discordToken+guildId)
+    // - this is the real login path; devLogin() is dev-only and 403s in production.
+    const guildId = discordSdk.guildId;
+    if (!guildId) {
+      throw new Error('No guild ID available - cannot establish a backend session');
+    }
+
+    const sessionResponse = await fetch('/api/auth/discord', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ discordToken: access_token, guildId })
+    });
+
+    if (!sessionResponse.ok) {
+      throw new Error('Failed to establish a backend session for the authenticated Discord user');
+    }
+
+    const sessionData = await sessionResponse.json() as { token?: string };
+    if (!sessionData.token) {
+      throw new Error('Backend did not return a session token');
+    }
+    authToken = sessionData.token;
+
     // Get channel and guild info
     await fetchChannelInfo();
     await fetchGuildInfo();
-    
+
     // Subscribe to voice channel events
     await subscribeToVoiceEvents();
 
     return true;
   } catch (error) {
     console.error('[DiscordSDK] Initialization failed:', error);
+    authToken = null;
     return false;
   }
 }
 
 /**
- * Fetch current channel information
+ * Fetch current channel information.
+ * Uses the real getChannel RPC command (requires the 'guilds' scope, already
+ * requested above) to get the actual channel name/type instead of a placeholder.
  */
 async function fetchChannelInfo(): Promise<void> {
   if (!discordSdk || !isReady) return;
 
   try {
     const channelId = discordSdk.channelId;
-    if (channelId) {
-      // Get channel details via Discord API
+    if (!channelId) return;
+
+    try {
+      // fetchChannelInfo only runs on the real-SDK branch of initializeDiscordSdk,
+      // so discordSdk.commands.getChannel is always available here (the mock SDK
+      // never reaches this function).
+      const channelData = await discordSdk.commands.getChannel({ channel_id: channelId });
+
+      currentChannel = {
+        id: channelId,
+        name: channelData?.name || 'Casino Table',
+        type: channelData?.type ?? 2, // 2 = Voice channel, used as a fallback
+        guildId: channelData?.guild_id || discordSdk.guildId || ''
+      };
+    } catch (innerError) {
+      // getChannel isn't available on the mock SDK / can fail independently of
+      // the outer try - fall back to a placeholder rather than leaving no data.
+      console.warn('[DiscordSDK] getChannel unavailable, using fallback channel info:', innerError);
       currentChannel = {
         id: channelId,
         name: 'Casino Table',
-        type: 2, // Voice channel
+        type: 2,
         guildId: discordSdk.guildId || ''
       };
     }
@@ -207,7 +311,12 @@ async function fetchChannelInfo(): Promise<void> {
 }
 
 /**
- * Fetch current guild information
+ * Fetch current guild information.
+ * NOTE: the embedded-app-sdk does not expose a getGuild-equivalent RPC command
+ * for Activities (only getChannel is available) - resolving the guild's real
+ * name/icon would require an additional bot-token REST call, which the client
+ * has no credentials for. `name`/`icon` below are therefore an intentional,
+ * documented placeholder - only `id` is real, authoritative data.
  */
 async function fetchGuildInfo(): Promise<void> {
   if (!discordSdk || !isReady) return;
@@ -217,7 +326,7 @@ async function fetchGuildInfo(): Promise<void> {
     if (guildId) {
       currentGuild = {
         id: guildId,
-        name: 'Discord Server',
+        name: 'Discord Server', // placeholder - SDK exposes no real guild name to Activities
         icon: null
       };
     }
@@ -420,6 +529,8 @@ export async function setActivity(details: string, state?: string): Promise<void
 
 export default {
   initializeDiscordSdk,
+  isRunningInDiscordActivity,
+  getAuthToken,
   getCurrentUser,
   getCurrentChannel,
   getCurrentGuild,

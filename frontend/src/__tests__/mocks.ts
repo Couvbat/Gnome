@@ -81,7 +81,7 @@ export const createMockApiService = () => ({
   login: vi.fn().mockResolvedValue({ token: 'mock-token', user: mockUser }),
   getCurrentUser: vi.fn().mockResolvedValue(mockUser),
   createCharacter: vi.fn().mockResolvedValue(mockCharacter),
-  getCharacter: vi.fn().mockResolvedValue(mockCharacter),
+  getMyCharacter: vi.fn().mockResolvedValue(mockCharacter),
   deleteCharacter: vi.fn().mockResolvedValue(undefined),
   updateCharacter: vi.fn().mockResolvedValue(mockCharacter),
   getActiveTables: vi.fn().mockResolvedValue([mockGameTable]),
@@ -122,6 +122,8 @@ export const createMockWsService = () => ({
 // Create mock Discord SDK service
 export const createMockDiscordSdk = () => ({
   initializeDiscordSdk: vi.fn().mockResolvedValue(true),
+  isRunningInDiscordActivity: vi.fn().mockReturnValue(false),
+  getAuthToken: vi.fn().mockReturnValue(null),
   getCurrentUser: vi.fn().mockReturnValue({
     id: 'mock-user-123',
     username: 'MockUser',

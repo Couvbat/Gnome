@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { apiService } from '../../services/api';
 import { SLOT_SYMBOLS, GAME_CONFIG } from '../../constants';
 import Button from '../atoms/Button.vue';
@@ -16,15 +16,25 @@ const spinning = ref(false);
 const bet = ref(GAME_CONFIG.MIN_BET);
 const result = ref<{ type: ResultType; message: string; details?: string } | null>(null);
 const userBalance = ref(0);
+const balanceError = ref(false);
+// Tracked so onUnmounted can cancel a pending reel animation - otherwise it
+// keeps running after the component is torn down and eventually fires a real
+// backend spin/bet call (spinBackend) from an unmounted component.
+let spinInterval: ReturnType<typeof setInterval> | null = null;
 
 onMounted(fetchBalance);
+onUnmounted(() => {
+  if (spinInterval) clearInterval(spinInterval);
+});
 
 async function fetchBalance() {
   try {
     const user = await apiService.getCurrentUser();
     userBalance.value = user.coins;
+    balanceError.value = false;
   } catch (e) {
     console.error('Failed to fetch balance:', e);
+    balanceError.value = true;
   }
 }
 
@@ -34,7 +44,7 @@ async function handleSpin() {
   result.value = null;
 
   let counter = 0;
-  const interval = setInterval(() => {
+  spinInterval = setInterval(() => {
     reels.value = [
       SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)],
       SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)],
@@ -42,7 +52,8 @@ async function handleSpin() {
     ];
     counter++;
     if (counter >= 15) {
-      clearInterval(interval);
+      if (spinInterval) clearInterval(spinInterval);
+      spinInterval = null;
       spinBackend();
     }
   }, 100);
@@ -84,6 +95,11 @@ const payouts = [
 <template>
   <div class="w-full max-w-4xl mx-auto px-4 py-8">
     <GameHeader emoji="🎰" title="Machine à Sous" @leave="emit('leave')" />
+
+    <div v-if="balanceError" class="mb-4 px-4 py-3 bg-red-500/15 border border-red-500/40 rounded-xl text-red-400 text-center text-sm">
+      Impossible de récupérer votre solde.
+      <button class="underline font-semibold ml-1" @click="fetchBalance">Réessayer</button>
+    </div>
 
     <Card
       variant="glass"

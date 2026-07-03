@@ -10,27 +10,35 @@ import {
 } from '../utils/cardUtils';
 
 describe('cardUtils', () => {
+  // getCardImage/getCardBack now resolve through Vite's import.meta.glob so the
+  // production build bundles the files instead of dropping a runtime-built
+  // literal path. The exact resolved URL is bundler-dependent (dev vs build),
+  // so these assertions check the resolved filename rather than a hardcoded path.
   describe('getCardImage', () => {
-    it('should return correct path for ace of hearts', () => {
+    it('should resolve a non-empty URL ending in the ace of hearts filename', () => {
       const path = getCardImage('hearts', 'A');
-      expect(path).toBe('/src/assets/kenney_playing-cards-pack/PNG/Cards (large)/card_hearts_A.png');
+      expect(path).toBeTruthy();
+      expect(path).toContain('card_hearts_A.png');
     });
 
-    it('should return correct path for numbered cards', () => {
+    it('should resolve a non-empty URL ending in the numbered card filename', () => {
       const path = getCardImage('spades', '07');
-      expect(path).toBe('/src/assets/kenney_playing-cards-pack/PNG/Cards (large)/card_spades_07.png');
+      expect(path).toBeTruthy();
+      expect(path).toContain('card_spades_07.png');
     });
 
-    it('should return correct path for face cards', () => {
+    it('should resolve a non-empty URL ending in the face card filename', () => {
       const path = getCardImage('diamonds', 'K');
-      expect(path).toBe('/src/assets/kenney_playing-cards-pack/PNG/Cards (large)/card_diamonds_K.png');
+      expect(path).toBeTruthy();
+      expect(path).toContain('card_diamonds_K.png');
     });
   });
 
   describe('getCardBack', () => {
-    it('should return correct card back path', () => {
+    it('should resolve a non-empty URL ending in the card back filename', () => {
       const path = getCardBack();
-      expect(path).toBe('/src/assets/kenney_playing-cards-pack/PNG/Cards (large)/card_back.png');
+      expect(path).toBeTruthy();
+      expect(path).toContain('card_back.png');
     });
   });
 

@@ -210,6 +210,45 @@ describe('RouletteWheel', () => {
     expect(alert).toHaveBeenCalledWith('Betting round is closed');
   });
 
+  it('does not roll back a bet the server already confirmed when a later unrelated error arrives', async () => {
+    const wrapper = mountWheel();
+    await flushPromises();
+    trigger('roulette:betting_opened', { timeRemaining: 30 });
+    await wrapper.vm.$nextTick();
+
+    wrapper.findComponent(RouletteNumberGrid).props('onNumberClick')(17);
+    await wrapper.vm.$nextTick();
+
+    // Server confirms the bet (per-socket ack), discarding the rollback snapshot.
+    trigger('roulette:bet_placed', { message: 'Bet placed successfully' });
+    // A later unrelated error must not revert the confirmed bet.
+    trigger('error', { message: 'Some unrelated failure' });
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain('#17: 10');
+    expect(wrapper.text()).toContain('Total des paris: 10');
+  });
+
+  it('rolls back the optimistic bet when the server rejects it', async () => {
+    const wrapper = mountWheel();
+    await flushPromises();
+    trigger('roulette:betting_opened', { timeRemaining: 30 });
+    await wrapper.vm.$nextTick();
+
+    // Optimistically applied locally before the server responds.
+    wrapper.findComponent(RouletteNumberGrid).props('onNumberClick')(17);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain('#17: 10');
+    expect(wrapper.text()).toContain('Total des paris: 10');
+
+    // Server rejects the bet - local state should revert to before it was applied.
+    trigger('error', { message: 'Betting round is closed' });
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).not.toContain('#17: 10');
+    expect(wrapper.text()).toContain('Total des paris: 0');
+  });
+
   it('unregisters listeners, clears the countdown timer, and leaves the table on unmount', async () => {
     const wrapper = mountWheel();
     await flushPromises();

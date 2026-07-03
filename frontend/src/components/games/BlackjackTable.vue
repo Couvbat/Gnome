@@ -40,13 +40,18 @@ const betAmount = ref(10);
 const userBalance = ref(0);
 const mySeatIndex = ref(-1);
 const isProcessing = ref(false);
+const balanceError = ref(false);
 
 async function fetchUserData() {
   try {
     const user = await apiService.getCurrentUser();
     userBalance.value = user.coins;
     currentUserId.value = user.id;
-  } catch (e) { console.error('Failed to fetch user data:', e); }
+    balanceError.value = false;
+  } catch (e) {
+    console.error('Failed to fetch user data:', e);
+    balanceError.value = true;
+  }
 }
 
 function seatFromPlayerState(p: BlackjackPlayerState): PlayerSeatData {
@@ -159,6 +164,44 @@ function handlePlayerLeft(data: { userId: string }) {
 
 function handleError(data: { message: string }) {
   alert(data.message);
+  clearProcessingTimeout();
+  isProcessing.value = false;
+}
+
+// Server-ack handlers for the actions below - these are what actually clear
+// isProcessing. Setting it back to false synchronously right after the fire-
+// and-forget emit was a no-op (both writes batched into the same render), so
+// the disabled state never showed. A timeout fallback guards against the ack
+// never arriving (e.g. dropped message) so the UI doesn't stay disabled forever.
+let processingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function startProcessingTimeout() {
+  clearProcessingTimeout();
+  processingTimeout = setTimeout(() => {
+    isProcessing.value = false;
+    processingTimeout = null;
+  }, 5000);
+}
+
+function clearProcessingTimeout() {
+  if (processingTimeout) {
+    clearTimeout(processingTimeout);
+    processingTimeout = null;
+  }
+}
+
+function handleBetConfirmed() {
+  clearProcessingTimeout();
+  isProcessing.value = false;
+}
+
+function handleHitResult() {
+  clearProcessingTimeout();
+  isProcessing.value = false;
+}
+
+function handleStandConfirmed() {
+  clearProcessingTimeout();
   isProcessing.value = false;
 }
 
@@ -168,8 +211,11 @@ onMounted(async () => {
     wsService.on('blackjack:joined', handleJoined);
     wsService.on('blackjack:player_joined', handlePlayerJoined);
     wsService.on('blackjack:bet_placed', handleBetPlaced);
+    wsService.on('blackjack:bet_confirmed', handleBetConfirmed);
     wsService.on('blackjack:game_started', handleGameStarted);
+    wsService.on('blackjack:hit_result', handleHitResult);
     wsService.on('blackjack:player_hit', handlePlayerHit);
+    wsService.on('blackjack:stand_confirmed', handleStandConfirmed);
     wsService.on('blackjack:player_stand', handlePlayerStand);
     wsService.on('blackjack:turn_changed', handleTurnChanged);
     wsService.on('blackjack:dealer_reveal', handleDealerReveal);
@@ -182,11 +228,15 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  clearProcessingTimeout();
   wsService.off('blackjack:joined', handleJoined);
   wsService.off('blackjack:player_joined', handlePlayerJoined);
   wsService.off('blackjack:bet_placed', handleBetPlaced);
+  wsService.off('blackjack:bet_confirmed', handleBetConfirmed);
   wsService.off('blackjack:game_started', handleGameStarted);
+  wsService.off('blackjack:hit_result', handleHitResult);
   wsService.off('blackjack:player_hit', handlePlayerHit);
+  wsService.off('blackjack:stand_confirmed', handleStandConfirmed);
   wsService.off('blackjack:player_stand', handlePlayerStand);
   wsService.off('blackjack:turn_changed', handleTurnChanged);
   wsService.off('blackjack:dealer_reveal', handleDealerReveal);
@@ -200,22 +250,22 @@ onUnmounted(() => {
 function placeBet() {
   if (!props.table || mySeatIndex.value === -1 || isProcessing.value) return;
   isProcessing.value = true;
+  startProcessingTimeout();
   wsService.placeBlackjackBet(props.table.id, betAmount.value);
-  isProcessing.value = false;
 }
 
 function hit() {
   if (!props.table || mySeatIndex.value === -1 || isProcessing.value) return;
   isProcessing.value = true;
+  startProcessingTimeout();
   wsService.hitBlackjack(props.table.id);
-  isProcessing.value = false;
 }
 
 function stand() {
   if (!props.table || mySeatIndex.value === -1 || isProcessing.value) return;
   isProcessing.value = true;
+  startProcessingTimeout();
   wsService.standBlackjack(props.table.id);
-  isProcessing.value = false;
 }
 
 function getSeatPosition(index: number) {
@@ -245,6 +295,11 @@ function getSeatPosition(index: number) {
         <Badge variant="success" size="md">💰 {{ userBalance }}</Badge>
       </div>
       <Button variant="danger" size="sm" @click="emit('leave')">← Lobby</Button>
+    </div>
+
+    <div v-if="balanceError" class="max-w-7xl mx-auto mb-4 px-4 py-3 bg-red-500/15 border border-red-500/40 rounded-xl text-red-400 text-center text-sm">
+      Impossible de récupérer votre solde.
+      <button class="underline font-semibold ml-1" @click="fetchUserData">Réessayer</button>
     </div>
 
     <div class="max-w-7xl mx-auto">

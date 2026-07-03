@@ -40,6 +40,33 @@ describe('CharacterCreation', () => {
     expect(apiService.createCharacter).not.toHaveBeenCalled();
   });
 
+  it('does not auto-delete the character on mount, even in dev mode, without an explicit ?devReset=true', async () => {
+    vi.stubEnv('VITE_DEV_MODE', 'true');
+    window.history.replaceState({}, '', '/');
+    try {
+      mount(CharacterCreation, { props: { userId: 'user-1' } });
+      await flushPromises();
+
+      expect(apiService.deleteCharacter).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('auto-deletes the character on mount only with the explicit ?devReset=true opt-in', async () => {
+    vi.stubEnv('VITE_DEV_MODE', 'true');
+    window.history.replaceState({}, '', '/?devReset=true');
+    try {
+      mount(CharacterCreation, { props: { userId: 'user-1' } });
+      await flushPromises();
+
+      expect(apiService.deleteCharacter).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      window.history.replaceState({}, '', '/');
+    }
+  });
+
   it('requires a class before creating a character', async () => {
     const wrapper = mount(CharacterCreation, { props: { userId: 'user-1' } });
     await wrapper.find('#character-name').setValue('Aragorn');

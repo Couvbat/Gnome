@@ -126,4 +126,21 @@ describe('DiceGame', () => {
 
     expect(wrapper.emitted('leave')).toBeTruthy();
   });
+
+  it('does not fire the backend roll call if unmounted mid-animation', async () => {
+    const wrapper = mount(DiceGame);
+    await flushPromises();
+    await selectPrediction(wrapper, 7);
+    await wrapper.vm.$nextTick();
+    await wrapper.find('button.py-6').trigger('click');
+
+    // Unmount partway through the 10-tick roll animation, before rollBackend() would fire.
+    await vi.advanceTimersByTimeAsync(400);
+    wrapper.unmount();
+
+    await vi.advanceTimersByTimeAsync(800);
+    await flushPromises();
+
+    expect(apiService.rollDice).not.toHaveBeenCalled();
+  });
 });

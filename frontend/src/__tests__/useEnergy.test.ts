@@ -105,6 +105,27 @@ describe('useEnergy', () => {
     expect(state.energy.value?.minutesUntilFull).toBe(0);
   });
 
+  it('falls back to the last known minutesUntilFull instead of Infinity when regenRate is 0', async () => {
+    vi.mocked(apiService.getEnergy).mockResolvedValue({
+      current: 50,
+      max: 100,
+      regenRate: 0,
+      lastRegen: new Date().toISOString(),
+      minutesUntilFull: 999,
+    });
+
+    const { state } = mountUseEnergy(1000, 60000);
+    await vi.waitFor(() => expect(state.isLoading.value).toBe(false));
+
+    vi.setSystemTime(Date.now() + 5 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // No regen occurs, so current stays put and minutesUntilFull must not become Infinity.
+    expect(state.energy.value?.current).toBe(50);
+    expect(state.energy.value?.minutesUntilFull).toBe(999);
+    expect(Number.isFinite(state.energy.value?.minutesUntilFull)).toBe(true);
+  });
+
   it('refresh() re-fetches and toggles isLoading', async () => {
     vi.mocked(apiService.getEnergy).mockResolvedValue({
       current: 10,

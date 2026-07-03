@@ -29,6 +29,7 @@ const view = ref<View>('lobby');
 const activeTables = ref<GameTable[]>([]);
 const selectedTable = ref<GameTable | null>(null);
 const showProfile = ref(false);
+const lobbyError = ref<string | null>(null);
 const isInDiscordActivity = isDiscordSdkReady();
 
 async function refreshActiveTables() {
@@ -38,7 +39,11 @@ async function refreshActiveTables() {
       apiService.getActiveTables('roulette'),
     ]);
     activeTables.value = [...blackjackTables, ...rouletteTables];
-  } catch (e) { console.error('Failed to load tables:', e); }
+    lobbyError.value = null;
+  } catch (e) {
+    console.error('Failed to load tables:', e);
+    lobbyError.value = 'Impossible de charger les tables actives.';
+  }
 }
 
 onMounted(refreshActiveTables);
@@ -61,8 +66,12 @@ async function handleJoinGame(gameType: GameType) {
     } else {
       selectedTable.value = await apiService.createRouletteTable(GAME_CONFIG.MIN_BET, GAME_CONFIG.MAX_BET);
     }
+    lobbyError.value = null;
     view.value = gameType;
-  } catch (e) { console.error('Failed to join game:', e); }
+  } catch (e) {
+    console.error('Failed to join game:', e);
+    lobbyError.value = 'Impossible de rejoindre la partie. Réessayez.';
+  }
 }
 
 async function handleLeaveGame() {
@@ -86,6 +95,10 @@ const classInfo = CHARACTER_CLASSES[props.character.className];
     <CharacterProfile v-if="showProfile" :character="character" :energy="energy" @close="showProfile = false" />
     <VoiceParticipants v-if="isInDiscordActivity" />
     <CharacterInfoCard :character="character" :user-coins="userCoins" :energy="energy" @profile-click="showProfile = true" />
+    <div v-if="lobbyError" class="px-4 py-3 bg-red-500/15 border border-red-500/40 rounded-xl text-red-400 text-center text-sm">
+      {{ lobbyError }}
+      <button class="underline font-semibold ml-1" @click="refreshActiveTables">Réessayer</button>
+    </div>
     <GamesGrid :active-tables="activeTables" @join-game="handleJoinGame" />
 
     <Card variant="default" padding="md" :bordered="true">

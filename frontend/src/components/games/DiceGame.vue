@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { apiService } from '../../services/api';
 import { DICE_CONFIG, GAME_CONFIG } from '../../constants';
 import Button from '../atoms/Button.vue';
@@ -17,18 +17,28 @@ const bet = ref(GAME_CONFIG.MIN_BET);
 const prediction = ref<number | null>(null);
 const result = ref<{ type: ResultType; message: string; details?: string } | null>(null);
 const userBalance = ref(0);
+const balanceError = ref(false);
+// Tracked so onUnmounted can cancel a pending roll animation - otherwise it
+// keeps running after the component is torn down and eventually fires a real
+// backend roll/bet call (rollBackend) from an unmounted component.
+let rollInterval: ReturnType<typeof setInterval> | null = null;
 
 const dieFaces = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 const getDieFace = (v: number) => dieFaces[v - 1] ?? '⚀';
 
 onMounted(fetchBalance);
+onUnmounted(() => {
+  if (rollInterval) clearInterval(rollInterval);
+});
 
 async function fetchBalance() {
   try {
     const user = await apiService.getCurrentUser();
     userBalance.value = user.coins;
+    balanceError.value = false;
   } catch (e) {
     console.error('Failed to fetch balance:', e);
+    balanceError.value = true;
   }
 }
 
@@ -38,11 +48,12 @@ async function handleRoll() {
   result.value = null;
 
   let counter = 0;
-  const interval = setInterval(() => {
+  rollInterval = setInterval(() => {
     dice.value = [Math.floor(Math.random() * 6) + 1, Math.floor(Math.random() * 6) + 1];
     counter++;
     if (counter >= 10) {
-      clearInterval(interval);
+      if (rollInterval) clearInterval(rollInterval);
+      rollInterval = null;
       rollBackend();
     }
   }, 100);
@@ -84,6 +95,11 @@ const rules = [
 <template>
   <div class="w-full max-w-5xl mx-auto px-4 py-8">
     <GameHeader emoji="🎲" title="Jeu de Dés" @leave="emit('leave')" />
+
+    <div v-if="balanceError" class="mb-4 px-4 py-3 bg-red-500/15 border border-red-500/40 rounded-xl text-red-400 text-center text-sm">
+      Impossible de récupérer votre solde.
+      <button class="underline font-semibold ml-1" @click="fetchBalance">Réessayer</button>
+    </div>
 
     <Card variant="default" padding="lg" :bordered="true">
       <div class="flex justify-center gap-8 mb-8">

@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import type { User, Character } from './types';
-import { apiService } from './services/api';
+import { apiService, authExpired } from './services/api';
 import { wsService } from './services/websocket';
 import {
   initializeDiscordSdk,
+  isRunningInDiscordActivity,
+  getAuthToken,
   getCurrentUser as getDiscordUser,
-  getGuildId,
-  getChannelId,
 } from './services/discordSdk';
 import { useEnergy } from './composables';
 import CharacterCreation from './components/CharacterCreation.vue';
@@ -31,6 +31,16 @@ onMounted(() => {
   initializeApp();
 });
 
+// Guards the authExpired watcher against an infinite retry loop: on retry,
+// initializeDiscordSdk() is idempotent and returns the same cached (stale)
+// token that just 401'd, so a second consecutive failure means automatic
+// re-auth cannot succeed and the user must reload the Activity.
+let hasRetriedAuth = false;
+
+// Single rule for when the socket connects: once a character exists (either
+// found on init, or just created). Both branches below and
+// handleCharacterCreated follow this same rule - wsService.connect() already
+// no-ops if already connected, so there's no need to guard it further.
 const initializeApp = async () => {
   try {
     const isFramed =
@@ -38,50 +48,65 @@ const initializeApp = async () => {
       window.location.search.includes('frame_id');
 
     if (isFramed) {
-      try {
-        const sdkSuccess = await initializeDiscordSdk();
-        if (sdkSuccess) {
-          const discordUser = getDiscordUser();
-          getGuildId();
-          getChannelId();
+      const sdkSuccess = await initializeDiscordSdk();
 
-          if (discordUser) {
-            try {
-              const authResponse = await apiService.devLogin(
-                discordUser.globalName || discordUser.username
-              );
-              const userData = await apiService.getCurrentUser();
-              if (discordUser.avatar && discordUser.id) {
-                userData.avatarUrl = `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png?size=128`;
-                userData.discordUsername = discordUser.username;
-                userData.discordGlobalName =
-                  discordUser.globalName || discordUser.username;
-              }
-              user.value = userData;
-              wsService.connect(authResponse.token);
-              const characterData = await apiService.getCharacter(userData.id);
-              character.value = characterData;
-              view.value = characterData ? 'casino' : 'character-creation';
-              return;
-            } catch {
-              /* fall through to regular auth */
-            }
-          }
+      if (isRunningInDiscordActivity()) {
+        // Real Discord Activity: the Discord OAuth exchange (discordSdk.ts,
+        // which calls POST /api/auth/discord) is the only valid login path.
+        // devLogin() is dev-only and the backend 403s it in production, so we
+        // must not fall back to it here - surface a real error instead.
+        if (!sdkSuccess) {
+          error.value =
+            "Impossible de se connecter à Discord. Vérifiez votre connexion et réessayez.";
+          view.value = 'character-creation';
+          return;
         }
-      } catch {
-        /* fall through */
+
+        const authToken = getAuthToken();
+        if (!authToken) {
+          error.value =
+            "L'authentification Discord a échoué. Veuillez recharger l'application.";
+          view.value = 'character-creation';
+          return;
+        }
+
+        localStorage.setItem('authToken', authToken);
+        const discordUser = getDiscordUser();
+        const userData = await apiService.getCurrentUser();
+        if (discordUser?.avatar && discordUser.id) {
+          userData.avatarUrl = `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png?size=128`;
+          userData.discordUsername = discordUser.username;
+          userData.discordGlobalName = discordUser.globalName || discordUser.username;
+        }
+        user.value = userData;
+        const characterData = await apiService.getMyCharacter();
+        character.value = characterData;
+        view.value = characterData ? 'casino' : 'character-creation';
+        if (characterData) wsService.connect(authToken);
+        error.value = null;
+        hasRetriedAuth = false;
+        return;
       }
+      // Framed but not a real Discord Activity (e.g. local iframe testing
+      // without a frame_id) - fall through to the dev login path below.
     }
 
+    // Not running inside a real Discord Activity - local browser dev only.
     const authResponse = await apiService.devLogin('Demo User');
     const userData = await apiService.getCurrentUser();
     user.value = userData;
-    const characterData = await apiService.getCharacter(userData.id);
+    const characterData = await apiService.getMyCharacter();
     character.value = characterData;
     view.value = characterData ? 'casino' : 'character-creation';
     if (characterData) wsService.connect(authResponse.token);
-  } catch {
-    error.value = 'Failed to initialize application. Using demo mode.';
+    error.value = null;
+    hasRetriedAuth = false;
+  } catch (err) {
+    console.error('[App] Failed to initialize application:', err);
+    error.value =
+      err instanceof Error
+        ? `Erreur lors de l'initialisation : ${err.message}`
+        : "Erreur lors de l'initialisation de l'application.";
     view.value = 'character-creation';
   }
 };
@@ -97,15 +122,40 @@ const refreshUserData = async () => {
   try {
     const [userData, characterData] = await Promise.all([
       apiService.getCurrentUser(),
-      user.value?.id ? apiService.getCharacter(user.value.id) : Promise.resolve(null),
+      apiService.getMyCharacter(),
       refreshEnergy(),
     ]);
     user.value = userData;
     if (characterData) character.value = characterData;
-  } catch {
-    /* ignore */
+  } catch (err) {
+    console.error('[App] Failed to refresh user data:', err);
+    error.value = 'Impossible de rafraîchir vos données. Réessayez plus tard.';
   }
 };
+
+// Global 401 handling (services/api.ts response interceptor): when any API
+// call comes back unauthorized, the token is stale/expired - clear session
+// state, surface a clear message, and re-run the init flow to get a fresh
+// session instead of leaving the user stuck on silently-failing requests.
+// Only one automatic retry is attempted (hasRetriedAuth, reset on success):
+// if the retry itself 401s again, re-running init would just reuse the same
+// cached token and loop forever, so stop and ask the user to reload instead.
+watch(authExpired, async (expired) => {
+  if (!expired) return;
+  authExpired.value = false;
+  wsService.disconnect();
+  user.value = null;
+  character.value = null;
+  if (hasRetriedAuth) {
+    error.value = "Votre session a expiré. Veuillez recharger l'application.";
+    view.value = 'character-creation';
+    return;
+  }
+  hasRetriedAuth = true;
+  view.value = 'loading';
+  error.value = 'Votre session a expiré. Reconnexion en cours...';
+  await initializeApp();
+});
 </script>
 
 <template>

@@ -174,8 +174,52 @@ describe('BlackjackTable', () => {
     await wrapper.findComponent(GameControls).vm.$emit('hit');
     expect(wsService.hitBlackjack).toHaveBeenCalledWith('table-1');
 
+    // The server ack (hit_result) is what clears isProcessing - until it
+    // arrives, further actions are correctly blocked (double-submit guard).
+    trigger('blackjack:hit_result', { message: 'ok', card: { suit: 'hearts', rank: '2', value: 2 }, handValue: 18, isBusted: false });
+    await wrapper.vm.$nextTick();
+
     await wrapper.findComponent(GameControls).vm.$emit('stand');
     expect(wsService.standBlackjack).toHaveBeenCalledWith('table-1');
+  });
+
+  it('blocks a second action until the server ack clears isProcessing, with a timeout fallback', async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mountTable();
+      await flushPromises();
+
+      trigger('blackjack:joined', {
+        message: 'ok',
+        tableState: {
+          players: [{ userId: 'me', bet: 10, hand: [], isBusted: false, isStanding: false, hasPlacedBet: true }],
+          currentPlayer: 'me',
+          gamePhase: 'playing',
+          dealer: {},
+        },
+      });
+      await wrapper.vm.$nextTick();
+      trigger('blackjack:game_started', {
+        players: [{ userId: 'me', hand: [{ suit: 'hearts', rank: '9', value: 9 }, { suit: 'spades', rank: '7', value: 7 }], handValue: 16 }],
+        dealerUpCard: { suit: 'clubs', rank: '5', value: 5 },
+        currentPlayer: 'me',
+      });
+      await wrapper.vm.$nextTick();
+
+      await wrapper.findComponent(GameControls).vm.$emit('hit');
+      expect(wsService.hitBlackjack).toHaveBeenCalledTimes(1);
+
+      // No ack yet - a second hit is a no-op double-submit guard.
+      await wrapper.findComponent(GameControls).vm.$emit('hit');
+      expect(wsService.hitBlackjack).toHaveBeenCalledTimes(1);
+
+      // The timeout fallback resets isProcessing even without a server ack.
+      await vi.advanceTimersByTimeAsync(5000);
+      await wrapper.findComponent(GameControls).vm.$emit('hit');
+      expect(wsService.hitBlackjack).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('marks a seat as bust when the player busts on hit', async () => {

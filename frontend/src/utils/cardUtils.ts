@@ -1,5 +1,18 @@
 // Card utility functions for blackjack
 
+// Extend ImportMeta for Vite's static asset glob import. Scoped to just the
+// `glob` method (not `env`, which services/discordSdk.ts already declares) so
+// the two `declare global` augmentations merge additively instead of
+// conflicting on overlapping property types.
+declare global {
+  interface ImportMeta {
+    glob<T = unknown>(
+      pattern: string,
+      options: { eager: true; import: 'default' }
+    ): Record<string, T>;
+  }
+}
+
 export type Suit = 'hearts' | 'diamonds' | 'clubs' | 'spades';
 export type Rank = 'A' | '02' | '03' | '04' | '05' | '06' | '07' | '08' | '09' | '10' | 'J' | 'Q' | 'K';
 
@@ -9,18 +22,48 @@ export interface Card {
   value: number; // Blackjack value
 }
 
+// Statically import every card face image so Vite bundles them and rewrites
+// the paths to their final (possibly hashed) build URLs. A runtime-constructed
+// string like `/src/assets/...` only resolves in dev - `vite build` never sees
+// a literal string built at runtime, so the files are dropped from the bundle
+// and every card 404s in production.
+// Note: the literal folder name "Cards (large)" is deliberately NOT spelled
+// out in the glob pattern - its parentheses are treated as extglob-style
+// grouping by Vite's glob matcher and silently match zero files. A recursive
+// `**` under PNG/ sidesteps that without depending on the exact folder name.
+const cardImageModules = import.meta.glob<string>(
+  '../assets/kenney_playing-cards-pack/PNG/**/*.png',
+  { eager: true, import: 'default' }
+);
+
+// Lookup by filename (e.g. "card_hearts_A.png") -> resolved build URL
+const cardImagesByFilename: Record<string, string> = {};
+for (const [modulePath, url] of Object.entries(cardImageModules)) {
+  const fileName = modulePath.split('/').pop();
+  if (fileName) cardImagesByFilename[fileName] = url;
+}
+
+function resolveCardImage(fileName: string): string {
+  const url = cardImagesByFilename[fileName];
+  if (!url) {
+    console.error(`Card image not found in bundle: ${fileName}`);
+    return '';
+  }
+  return url;
+}
+
 /**
- * Get the image path for a card
+ * Get the (build-resolved) image URL for a card
  */
 export function getCardImage(suit: Suit, rank: Rank): string {
-  return `/src/assets/kenney_playing-cards-pack/PNG/Cards (large)/card_${suit}_${rank}.png`;
+  return resolveCardImage(`card_${suit}_${rank}.png`);
 }
 
 /**
  * Get card back image
  */
 export function getCardBack(): string {
-  return `/src/assets/kenney_playing-cards-pack/PNG/Cards (large)/card_back.png`;
+  return resolveCardImage('card_back.png');
 }
 
 /**

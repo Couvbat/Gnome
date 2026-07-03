@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { ref } from 'vue';
 import {
   Character,
   User,
@@ -11,6 +12,11 @@ import {
 function generateTableId(gameType: 'blackjack' | 'roulette'): string {
   return `${gameType}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+// Reactive "auth expired" signal, flipped by the 401 response interceptor
+// below. App.vue watches this to react (surface a re-login prompt) instead of
+// requests failing silently once the stored token goes stale/invalid.
+export const authExpired = ref(false);
 
 class ApiService {
   private client: AxiosInstance;
@@ -31,6 +37,20 @@ class ApiService {
       }
       return config;
     });
+
+    // Global 401 handling: clear the stale token and flag auth as expired so
+    // the app shell can prompt for re-login instead of every subsequent call
+    // failing silently.
+    this.client.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
+          localStorage.removeItem('authToken');
+          authExpired.value = true;
+        }
+        return Promise.reject(error);
+      }
+    );
   }
 
   // Auth endpoints
@@ -64,9 +84,13 @@ class ApiService {
     return response.data.character;
   }
 
-  async getCharacter(_userId: string): Promise<Character | null> {
+  // Renamed from getCharacter(userId) - it always hit /characters/me and
+  // silently ignored whatever id was passed in. The backend has no endpoint
+  // to fetch another user's character (backend/src/routes/characters.ts only
+  // exposes /me for the authenticated user), so this honestly reflects what
+  // it does instead of pretending to take a meaningful argument.
+  async getMyCharacter(): Promise<Character | null> {
     try {
-      // Note: userId is accepted for API consistency but we use /me endpoint
       const response = await this.client.get('/characters/me');
       if (response.data.hasCharacter) {
         return response.data.character;
