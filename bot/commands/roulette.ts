@@ -240,6 +240,13 @@ export const command: Command = {
       time: 60000
     });
 
+    // Tracks whether a bet type was ever finalized. The 'end' handler uses this
+    // to distinguish "nobody picked a bet type within 60s" (refund) from
+    // "a bet was placed and the collector was stopped on purpose" (no refund).
+    // Without this flag, the 60s timer fires on every round (rounds resolve in
+    // 3-6s) and unconditionally re-credits a bet that was already settled.
+    let betPlaced = false;
+
     collector.on('collect', async (buttonInteraction: ButtonInteraction) => {
       if (buttonInteraction.user.id !== userId) {
         await buttonInteraction.reply({
@@ -273,7 +280,8 @@ export const command: Command = {
 
         const modalSubmit = await buttonInteraction.awaitModalSubmit({ time: 30000 }).catch(() => null);
         if (!modalSubmit) {
-          // Timeout — do nothing; the outer collector will handle the refund on its own timeout
+          // Timeout — do nothing; no bet was placed, so the outer collector's
+          // own 'end' handler will refund once it also times out.
           return;
         }
 
@@ -285,6 +293,11 @@ export const command: Command = {
 
         game.betType = 'number';
         game.betValue = chosenNumber;
+
+        // Bet is now final — stop the collector so its 'end' handler doesn't
+        // fire a spurious refund once the 60s timer eventually elapses.
+        betPlaced = true;
+        collector.stop();
 
         await modalSubmit.deferUpdate();
         await interaction.editReply({
@@ -305,6 +318,10 @@ export const command: Command = {
 
         game.betType = betTypeMap[buttonInteraction.customId];
 
+        // Bet is now final — stop the collector (see comment above).
+        betPlaced = true;
+        collector.stop();
+
         const componentLabel = 'label' in buttonInteraction.component ? buttonInteraction.component.label : 'Bet';
         await buttonInteraction.update({
           content: `🎰 Vous avez choisi: **${componentLabel}**!\n🎲 La roulette tourne...`,
@@ -313,25 +330,27 @@ export const command: Command = {
         });
       }
 
-      // Simulate roulette spin with delay
+      // Resolve and pay out the bet immediately — the setTimeout below only
+      // delays the *visual* reveal for suspense. The payout must already be
+      // settled before the delay starts so a crash during that window can
+      // never lose (or duplicate) coins that were charged up front.
+      game.winningNumber = Math.floor(Math.random() * 37);
+      const result = await calculatePayout(game);
+
+      try {
+        if (result.won && result.payout > 0) {
+          await userLevelsDb.addCoins(userId, guildId, result.payout);
+        }
+        if (result.xpGain > 0) {
+          await userLevelsDb.addXp(userId, guildId, result.xpGain);
+        }
+      } catch (error) {
+        console.error('[Roulette] Error crediting payout:', error);
+      }
+
+      // Simulate roulette spin with delay (cosmetic only — the result above is already settled)
       setTimeout(async () => {
         try {
-          // Generate winning number
-          game.winningNumber = Math.floor(Math.random() * 37);
-          
-          // Calculate result
-          const result = await calculatePayout(game);
-          
-          // Handle payout
-          if (result.won && result.payout > 0) {
-            await userLevelsDb.addCoins(userId, guildId, result.payout);
-          }
-          
-          // Handle XP gain
-          if (result.xpGain > 0) {
-            await userLevelsDb.addXp(userId, guildId, result.xpGain);
-          }
-
           const resultEmbed = new EmbedBuilder()
             .setColor(result.won ? 0x00ff00 : 0xff0000)
             .setTitle('🎰 Résultat de la Roulette')
@@ -342,9 +361,9 @@ export const command: Command = {
             embeds: [resultEmbed],
             components: []
           });
-          
+
         } catch (error) {
-          console.error('[Roulette] Error processing result:', error);
+          console.error('[Roulette] Error revealing result:', error);
           await interaction.editReply({
             content: '❌ Une erreur est survenue lors du traitement du résultat.',
             embeds: [],
@@ -355,7 +374,8 @@ export const command: Command = {
     });
 
     collector.on('end', async (_collected, reason) => {
-      if (reason === 'time') {
+      if (reason === 'time' && !betPlaced) {
+        // Genuinely timed out with no bet ever placed — refund.
         try {
           await userLevelsDb.addCoins(userId, guildId, bet);
           await interaction.editReply({
@@ -366,7 +386,9 @@ export const command: Command = {
         } catch (error) {
           console.error('[Roulette] Error refunding coins on timeout:', error);
         }
-      } else {
+      } else if (!betPlaced) {
+        // Collector ended for some other reason before a bet was placed
+        // (e.g. message/channel deleted) — just disable the buttons.
         try {
           await interaction.editReply({
             components: []
@@ -375,6 +397,8 @@ export const command: Command = {
           console.log('Could not disable buttons:', error);
         }
       }
+      // If a bet was placed, the collect handler already paid out the round
+      // (or scheduled its reveal); there's nothing left to do here.
     });
   },
 

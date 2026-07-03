@@ -6,14 +6,20 @@ let connectionPromise: Promise<void> | null = null;
 
 // Graceful shutdown — registered once at module load to avoid duplicate listeners
 // when connectDatabase is called multiple times (e.g. on reconnect).
-process.once('SIGINT', async () => {
+// Both SIGINT (Ctrl+C / local dev) and SIGTERM (how process managers like pm2
+// ask a process to stop, e.g. on deploy/restart) must close the connection —
+// only handling SIGINT left production restarts skipping this cleanup.
+async function closeDatabaseConnection(): Promise<void> {
   try {
     await mongoose.connection.close();
     console.log('[Database] MongoDB connection closed through app termination');
   } catch (error) {
     console.error('[Database] Error closing MongoDB connection:', error);
   }
-});
+}
+
+process.once('SIGINT', closeDatabaseConnection);
+process.once('SIGTERM', closeDatabaseConnection);
 
 export async function connectDatabase(): Promise<void> {
   // If already connected, return immediately

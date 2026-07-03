@@ -21,6 +21,11 @@ export interface YtDlpPlaylistInfo {
 export class YtDlpService {
   private ytdlpPath: string;
 
+  // Hard cap for the one-shot yt-dlp calls below (info/search/version lookups).
+  // Without this, a stalled network call spawns a child process that never
+  // exits, hanging the caller (and leaking the process) indefinitely.
+  private static readonly SPAWN_TIMEOUT_MS = 15000;
+
   constructor(ytdlpPath: string = 'yt-dlp') {
     this.ytdlpPath = ytdlpPath;
   }
@@ -31,12 +36,28 @@ export class YtDlpService {
   async isAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
       const proc = spawn(this.ytdlpPath, ['--version']);
-      
+      let settled = false;
+
+      // A version check should be near-instant; 10s is generous.
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.error('[YT-DLP] isAvailable check timed out, killing process');
+        proc.kill('SIGKILL');
+        resolve(false);
+      }, 10000);
+
       proc.on('error', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         resolve(false);
       });
-      
+
       proc.on('close', (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         resolve(code === 0);
       });
     });
@@ -57,6 +78,15 @@ export class YtDlpService {
       const proc = spawn(this.ytdlpPath, args);
       let stdout = '';
       let stderr = '';
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.error('[YT-DLP] getInfo timed out, killing process');
+        proc.kill('SIGKILL');
+        resolve(null);
+      }, YtDlpService.SPAWN_TIMEOUT_MS);
 
       proc.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -67,11 +97,18 @@ export class YtDlpService {
       });
 
       proc.on('error', (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         console.error('[YT-DLP] Process error:', error);
         reject(error);
       });
 
       proc.on('close', (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+
         if (code !== 0) {
           console.error('[YT-DLP] Error:', stderr);
           resolve(null);
@@ -110,6 +147,15 @@ export class YtDlpService {
       const proc = spawn(this.ytdlpPath, args);
       let stdout = '';
       let stderr = '';
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.error('[YT-DLP] getPlaylistInfo timed out, killing process');
+        proc.kill('SIGKILL');
+        resolve(null);
+      }, YtDlpService.SPAWN_TIMEOUT_MS);
 
       proc.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -120,11 +166,18 @@ export class YtDlpService {
       });
 
       proc.on('error', (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         console.error('[YT-DLP] Process error:', error);
         reject(error);
       });
 
       proc.on('close', (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+
         if (code !== 0) {
           console.error('[YT-DLP] Error:', stderr);
           resolve(null);
@@ -176,6 +229,15 @@ export class YtDlpService {
       const proc = spawn(this.ytdlpPath, args);
       let stdout = '';
       let stderr = '';
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.error('[YT-DLP] getStreamUrl timed out, killing process');
+        proc.kill('SIGKILL');
+        resolve(null);
+      }, YtDlpService.SPAWN_TIMEOUT_MS);
 
       proc.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -186,11 +248,18 @@ export class YtDlpService {
       });
 
       proc.on('error', (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         console.error('[YT-DLP] Process error:', error);
         reject(error);
       });
 
       proc.on('close', (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+
         if (code !== 0) {
           console.error('[YT-DLP] Error getting stream URL:', stderr);
           resolve(null);
@@ -298,6 +367,15 @@ export class YtDlpService {
       const proc = spawn(this.ytdlpPath, args);
       let stdout = '';
       let stderr = '';
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.error('[YT-DLP] search timed out, killing process');
+        proc.kill('SIGKILL');
+        resolve([]);
+      }, YtDlpService.SPAWN_TIMEOUT_MS);
 
       proc.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
@@ -308,11 +386,18 @@ export class YtDlpService {
       });
 
       proc.on('error', (error: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         console.error('[YT-DLP] Process error:', error);
         reject(error);
       });
 
       proc.on('close', (code: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+
         if (code !== 0) {
           console.error('[YT-DLP] Search error:', stderr);
           resolve([]);

@@ -89,6 +89,13 @@ export const command: Command = {
         }
       );
 
+      if (accountResponse.statusCode === 429) {
+        await interaction.editReply({
+          content: '⏱️ Trop de requêtes vers l\'API Riot Games (limite de débit atteinte). Réessayez dans quelques instants.',
+        });
+        return;
+      }
+
       if (accountResponse.statusCode === 404) {
         await interaction.editReply({
           content: `Joueur introuvable: ${gameName}#${tagLine}. Vérifiez le nom et le tag.`,
@@ -112,6 +119,13 @@ export const command: Command = {
         }
       );
 
+      if (summonerResponse.statusCode === 429) {
+        await interaction.editReply({
+          content: '⏱️ Trop de requêtes vers l\'API Riot Games (limite de débit atteinte). Réessayez dans quelques instants.',
+        });
+        return;
+      }
+
       if (summonerResponse.statusCode !== 200) {
         throw new Error(`Summoner API returned status ${summonerResponse.statusCode}`);
       }
@@ -129,8 +143,13 @@ export const command: Command = {
       );
 
       let rankedEntries: RankedEntry[] = [];
-      
-      if (rankedResponse.statusCode === 403) {
+
+      if (rankedResponse.statusCode === 429) {
+        await interaction.editReply({
+          content: '⏱️ Trop de requêtes vers l\'API Riot Games (limite de débit atteinte). Réessayez dans quelques instants.',
+        });
+        return;
+      } else if (rankedResponse.statusCode === 403) {
         // API key doesn't have access to League-v4 endpoint
         // Continue without ranked data
         console.log('League-v4 endpoint returned 403 - continuing without ranked data');

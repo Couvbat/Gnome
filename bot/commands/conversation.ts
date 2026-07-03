@@ -30,6 +30,7 @@ export const command: Command = {
     await interaction.deferReply();
 
     const user = interaction.user.username;
+    const userId = interaction.user.id;
 
     try {
       if (!interaction.channel || !("threads" in interaction.channel)) {
@@ -61,7 +62,7 @@ export const command: Command = {
       collector.on("collect", (m: Message) => {
         console.log(`[Conversation] Message collected from ${m.author.username}: ${m.content}`);
         processingChain = processingChain
-          .then(() => handleMessage(m, threadChannel, user))
+          .then(() => handleMessage(m, threadChannel, user, userId))
           .catch(err => console.error('[Conversation] handleMessage error:', err));
       });
 
@@ -93,13 +94,14 @@ export const command: Command = {
 async function handleMessage(
   m: Message,
   threadChannel: ThreadChannel,
-  user: string
+  user: string,
+  userId: string
 ): Promise<void> {
   const userPrompt = m.content;
 
   try {
     // Fetch the conversation history
-    const conversationHistory = await getConversationHistory(threadChannel);
+    const conversationHistory = await getConversationHistory(threadChannel, userId);
 
     // Add the user's message to the conversation history
     conversationHistory.push({
@@ -171,13 +173,14 @@ async function handleMessage(
 
 // Function to get the conversation history
 async function getConversationHistory(
-  threadChannel: ThreadChannel
+  threadChannel: ThreadChannel,
+  invokerId: string
 ): Promise<MistralMessage[]> {
   // Limit to last 20 messages to reduce API load and keep context relevant
   // This is more efficient than loading all 100 messages every time
   const messages: Collection<string, Message> =
     await threadChannel.messages.fetch({ limit: 20 });
-  
+
   const conversationHistory: MistralMessage[] = [
     {
       role: "system",
@@ -192,19 +195,26 @@ async function getConversationHistory(
     // Skip empty messages or system messages
     if (!message.content || message.system) return;
 
-    if (message.author.id !== threadChannel.client.user?.id) {
-      conversationHistory.push({
-        role: "user",
-        content: message.content,
-      });
-    } else {
+    if (message.author.id === threadChannel.client.user?.id) {
       // Clean up the bot's formatted response to extract just the actual reply
       const content = message.content.replace(/^.*reponse : /, '');
       conversationHistory.push({
         role: "assistant",
         content: content,
       });
+    } else if (message.author.id === invokerId) {
+      // Only fold in messages from the user who started this conversation —
+      // the collector already only reacts to the invoker's messages, but
+      // message *history* fetched from the thread can still contain messages
+      // from other users who happen to have posted in it. Without this check
+      // they'd leak into Mistral's context as if they were the person having
+      // the conversation.
+      conversationHistory.push({
+        role: "user",
+        content: message.content,
+      });
     }
+    // else: message from a different, non-invoking user — ignore it.
   });
 
   console.log(`[Conversation] Loaded ${sortedMessages.length} messages from history`);

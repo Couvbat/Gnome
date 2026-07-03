@@ -40,7 +40,13 @@ export interface MusicQueue {
   loop: boolean;
   playing: boolean;
   currentStreamCleanup?: () => void; // Cleanup function for yt-dlp streams
+  consecutiveFailures: number; // Resets on a successful play(); caps auto-advance retries on a queue of dead tracks
 }
+
+// Stop auto-advancing through the queue after this many playback failures in a
+// row — otherwise a queue full of unplayable tracks retries indefinitely,
+// hammering yt-dlp/play-dl back-to-back.
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 export class MusicService {
   private queues: Map<string, MusicQueue> = new Map();
@@ -97,11 +103,15 @@ export class MusicService {
       tracks: [],
       volume: 50,
       loop: false,
-      playing: false
+      playing: false,
+      consecutiveFailures: 0
     };
 
-    // Subscribe the connection to the audio player
-    const subscription = voiceConnection.subscribe(audioPlayer);
+    // Subscribe the connection to the audio player. Mutable (not const) because
+    // the reconnect branch below must reassign it — otherwise the
+    // `!subscription.connection` guard keeps checking this original, now-dead
+    // subscription forever after the first reconnect.
+    let subscription = voiceConnection.subscribe(audioPlayer);
     if (!subscription) {
       console.error('[VOICE] Failed to subscribe audio player to voice connection');
       throw new Error('Failed to subscribe audio player');
@@ -111,7 +121,7 @@ export class MusicService {
     // Handle audio player state changes
     audioPlayer.on('stateChange', (oldState, newState) => {
       console.log(`[AUDIO PLAYER] State: ${oldState.status} -> ${newState.status}`);
-      
+
       if (newState.status === AudioPlayerStatus.Playing) {
         queue.playing = true;
       } else if (newState.status === AudioPlayerStatus.Idle) {
@@ -127,10 +137,11 @@ export class MusicService {
       console.error('[AUDIO PLAYER] Error:', error);
       console.error('[AUDIO PLAYER] Error resource:', (error as any).resource);
       queue.playing = false;
-      
+      queue.consecutiveFailures++;
+
       // Send error message to channel
       textChannel.send('❌ Erreur audio. Passage au titre suivant...').catch(console.error);
-      
+
       this.playNext(guildId);
     });
 
@@ -153,12 +164,17 @@ export class MusicService {
         console.log(`[VOICE] Connection destroyed for guild ${guildId}`);
         this.deleteQueue(guildId);
       } else if (
-        !subscription.connection && 
+        !subscription?.connection &&
         newState.status === VoiceConnectionStatus.Ready
       ) {
-        // Resubscribe if connection was lost
+        // Resubscribe if connection was lost, and reassign `subscription` so
+        // the `!subscription.connection` guard above reflects the new
+        // subscription on the next reconnect instead of checking a stale one.
         try {
-          voiceConnection.subscribe(audioPlayer);
+          const newSubscription = voiceConnection.subscribe(audioPlayer);
+          if (newSubscription) {
+            subscription = newSubscription;
+          }
         } catch (error) {
           console.error('[VOICE] Failed to resubscribe audio player:', error);
         }
@@ -473,7 +489,8 @@ export class MusicService {
 
       console.log(`[PLAY] Starting playback for: ${track.title}`);
       queue.audioPlayer.play(audioResource);
-      
+      queue.consecutiveFailures = 0; // Reset the failure streak once a track starts cleanly
+
       // Send now playing message
       try {
         const embed = this.createNowPlayingEmbed(track);
@@ -486,7 +503,8 @@ export class MusicService {
     } catch (error) {
       console.error('[PLAY] Error playing track:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+      queue.consecutiveFailures++;
+
       try {
         let userFriendlyMessage = '❌ Erreur lors de la lecture. Passage au titre suivant...';
         
@@ -520,6 +538,21 @@ export class MusicService {
 
     if (!queue.loop) {
       queue.tracks.shift(); // Remove current track if not looping
+    }
+
+    // A queue full of unplayable tracks would otherwise retry indefinitely —
+    // each failure calls playNext(), which calls play() on the next track,
+    // which can fail again immediately. Stop and let the user intervene
+    // instead of hammering yt-dlp/play-dl in a tight loop.
+    if (queue.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      console.error(`[MUSIC] Stopping auto-advance for guild ${guildId} after ${queue.consecutiveFailures} consecutive failures`);
+      queue.tracks = [];
+      queue.playing = false;
+      queue.consecutiveFailures = 0;
+      await queue.textChannel.send(
+        '❌ Plusieurs titres consécutifs ont échoué. Lecture arrêtée — vérifiez la file d\'attente et réessayez.'
+      ).catch(console.error);
+      return;
     }
 
     if (queue.tracks.length > 0) {

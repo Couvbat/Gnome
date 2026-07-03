@@ -19,6 +19,7 @@ describe('Roulette Command', () => {
       on: vi.fn((event, callback) => {
         mockCollector[`_${event}`] = callback;
       }),
+      stop: vi.fn(),
     };
 
     // Mock response with collector

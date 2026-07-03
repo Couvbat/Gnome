@@ -125,25 +125,27 @@ export const command: Command = {
 
     await interaction.reply({ embeds: [spinningEmbed] });
 
-    // Simulate spinning delay
+    // Spin and settle the result immediately — the setTimeout below only
+    // delays the *visual* reveal for suspense. The payout itself must already
+    // be credited/debited before the delay starts so a crash during that
+    // window can never lose (or duplicate) coins that were charged up front.
+    const reels = [getRandomSymbol(), getRandomSymbol(), getRandomSymbol()];
+    const result = calculateSlotResult(reels, bet);
+
+    try {
+      if (result.won && result.payout > 0) {
+        await userLevelsDb.addCoins(userId, guildId, result.payout);
+      }
+      if (result.xpGain > 0) {
+        await userLevelsDb.addXp(userId, guildId, result.xpGain);
+      }
+    } catch (error) {
+      console.error('[Slots] Error crediting payout:', error);
+    }
+
+    // Simulate spinning delay (cosmetic only — the payout above is already settled)
     setTimeout(async () => {
       try {
-        // Generate three random symbols
-        const reels = [getRandomSymbol(), getRandomSymbol(), getRandomSymbol()];
-        
-        // Calculate result
-        const result = calculateSlotResult(reels, bet);
-        
-        // Handle payout
-        if (result.won && result.payout > 0) {
-          await userLevelsDb.addCoins(userId, guildId, result.payout);
-        }
-        
-        // Handle XP gain
-        if (result.xpGain > 0) {
-          await userLevelsDb.addXp(userId, guildId, result.xpGain);
-        }
-
         const resultEmbed = new EmbedBuilder()
           .setColor(result.won ? 0x00ff00 : 0xff0000)
           .setTitle('🎰 Machine à Sous')
@@ -157,9 +159,9 @@ export const command: Command = {
           );
 
         await interaction.editReply({ embeds: [resultEmbed] });
-        
+
       } catch (error) {
-        console.error('[Slots] Error processing result:', error);
+        console.error('[Slots] Error revealing result:', error);
         await interaction.editReply({
           content: '❌ Une erreur est survenue lors du traitement du résultat.',
           embeds: []

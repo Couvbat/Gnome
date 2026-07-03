@@ -40,6 +40,11 @@ interface ConnectionData {
   channel: TextChannel;
   conversationHistory: MistralMessage[];
   audioPlayer: AudioPlayer;
+  // Serializes processing (transcription + Mistral + TTS) of overlapping
+  // speaking events for this guild, one at a time — mirrors the pattern used
+  // in commands/conversation.ts. Without this, two users speaking around the
+  // same time can race on conversationHistory and the shared audioPlayer.
+  processingChain: Promise<void>;
 }
 
 interface WhisperResponse {
@@ -65,6 +70,11 @@ const activeConnections = new Map<string, ConnectionData>();
 // Configuration for audio processing
 const TEMP_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 minutes
 const TEMP_FILE_MAX_AGE = 60 * 60 * 1000; // 1 hour
+
+// Hard cap on a single utterance's recording length, independent of silence
+// detection. Without this, a stuck stream (or someone who just never stops
+// talking) can hold the capture pipeline open indefinitely.
+const MAX_RECORDING_DURATION_MS = 90 * 1000; // 90 seconds
 
 // Cleanup old temp files periodically
 setInterval(() => {
@@ -236,11 +246,30 @@ export const command: Command = {
         return;
       }
 
+      // Re-check for a race right before claiming the guild slot. The initial
+      // check (above) happens before all of the async/setup work above it, so
+      // two near-simultaneous /listen start invocations can both pass it and
+      // both get this far. Whichever call wins this second check keeps its
+      // connection; the loser tears down the one it just built instead of
+      // clobbering the winner's entry (which would leak the winner's voice
+      // connection — it'd stay connected but no longer be tracked/stoppable).
+      if (activeConnections.has(guildId)) {
+        console.warn(`[Listen] Lost the join race for guild ${guildId}; another invocation is already listening. Cleaning up.`);
+        connection.removeAllListeners();
+        audioPlayer.removeAllListeners();
+        connection.destroy();
+        await interaction.editReply({
+          content: "Je suis déjà en train d'écouter dans ce serveur !",
+        });
+        return;
+      }
+
       activeConnections.set(guildId, {
         connection,
         receiver,
         channel: interaction.channel as TextChannel,
         audioPlayer,
+        processingChain: Promise.resolve(),
         conversationHistory: [
           {
             role: "system",
@@ -252,7 +281,7 @@ export const command: Command = {
       console.log(`[Listen] Stored connection for guild ${guildId}, channel ${interaction.channel.id}`);
 
       // Listen to speaking events
-      receiver.speaking.on("start", async (userId: string) => {
+      receiver.speaking.on("start", (userId: string) => {
         console.log(`[Listen] User ${userId} started speaking in guild ${guildId}`);
 
         // Create temp directory inside bot folder if needed
@@ -275,9 +304,18 @@ export const command: Command = {
 
         console.log(`[Listen] Subscribed to audio stream for user ${userId}, decoding to PCM: ${pcmFile}`);
 
+        // Force-stop capture even if silence detection never fires (e.g. the
+        // user never stops talking, or leaves the mic open), so a single
+        // utterance can't hold the pipeline open indefinitely.
+        const maxDurationTimer = setTimeout(() => {
+          console.log(`[Listen] Max recording duration (${MAX_RECORDING_DURATION_MS}ms) reached for user ${userId}, forcing stream to end`);
+          opusStream.destroy();
+        }, MAX_RECORDING_DURATION_MS);
+        opusStream.once('close', () => clearTimeout(maxDurationTimer));
+
         // Lazy-load prism-media only when needed (avoids slow startup)
         const PrismMedia = getPrism();
-        
+
         // Decode Opus to PCM using prism-media
         const decoder = new PrismMedia.opus.Decoder({
           rate: 48000,  // Discord uses 48kHz
@@ -310,124 +348,27 @@ export const command: Command = {
         // Pipe: Opus stream → Decoder → File
         opusStream.pipe(decoder).pipe(writeStream);
 
-        // When decoding is complete, process the audio
-        writeStream.on('finish', async () => {
+        // When decoding is complete, queue the heavy processing (transcription,
+        // Mistral, TTS playback) behind any other utterance already in flight
+        // for this guild. Recording itself can happen concurrently for
+        // multiple speakers, but the shared conversation history array and the
+        // shared AudioPlayer must only ever be touched by one utterance's
+        // processing at a time — otherwise overlapping speaking events race on
+        // both.
+        writeStream.on('finish', () => {
+          clearTimeout(maxDurationTimer);
           console.log(`[Listen] PCM decode finished for user ${userId}, total bytes: ${bytesReceived}`);
-          // Check if file exists and has content
-          if (!fs.existsSync(pcmFile)) {
-            console.log(`[Listen] PCM file does not exist: ${pcmFile}`);
-            return;
-          }
 
-          const fileStats = fs.statSync(pcmFile);
-          console.log(`[Listen] PCM file size: ${fileStats.size} bytes`);
-
-          // Check if we have enough audio data for meaningful speech
-          // 48kHz stereo 16-bit PCM = 192,000 bytes/second
-          // Minimum 1 second of audio = 192KB
-          const minBytes = 192000; // 1 second
-          if (fileStats.size < minBytes) {
-            console.log(`[Listen] PCM file too small (${fileStats.size} bytes, need ${minBytes}), likely just noise or short sound. Ignoring.`);
+          const connectionData = activeConnections.get(guildId);
+          if (!connectionData) {
+            // Connection was torn down while we were recording; just clean up.
             if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
             return;
           }
 
-          try {
-            // Get user info
-            const user = await interaction.client.users.fetch(userId);
-            console.log(`[Listen] Processing audio from ${user.username}`);
-
-            // Convert PCM to OGG/Opus optimized for Whisper
-            const conversionSuccess = await convertPcmToWhisperFormat(pcmFile, outputFile);
-
-            if (!conversionSuccess) {
-              console.error(`[Listen] Audio conversion failed for user ${userId}`);
-              // Clean up temp files
-              if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
-              if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-              return;
-            }
-
-            // Verify the output file exists and has reasonable size
-            if (!fs.existsSync(outputFile)) {
-              console.error(`[Listen] Converted OGG file does not exist: ${outputFile}`);
-              if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
-              return;
-            }
-
-            const oggStats = fs.statSync(outputFile);
-            console.log(`[Listen] Converted OGG file size: ${oggStats.size} bytes`);
-
-            // Check if converted file is too small (likely corrupted or just noise)
-            if (oggStats.size < 2000) {
-              console.log(`[Listen] Converted audio file too small (${oggStats.size} bytes), likely corrupted or just noise. Ignoring.`);
-              if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
-              if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-              return;
-            }
-
-            // Transcribe with OpenAI Whisper using OGG file
-            const transcription = await transcribeAudio(outputFile);
-
-            // Clean up temp files
-            if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
-            if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-
-            console.log(`[Listen] Transcription result for ${user.username}: ${transcription ? `"${transcription}"` : 'null/empty'}`);
-
-            if (transcription) {
-              const connectionData = activeConnections.get(guildId);
-              if (connectionData) {
-                // Show transcription
-                await connectionData.channel.send(
-                  `🎤 **${user.username}** : "${transcription}"`
-                );
-
-                // Get AI response
-                const aiResponse = await getMistralResponse(transcription, connectionData);
-                
-                console.log(`[Listen] Mistral response for "${transcription}": ${aiResponse ? `"${aiResponse.substring(0, 100)}..."` : 'null/empty'}`);
-                
-                if (aiResponse) {
-                  // Show AI response in text
-                  await connectionData.channel.send(`🤖 **Le Gnome** : ${aiResponse}`);
-
-                  // Generate TTS audio and play it in voice channel
-                  const ttsAudioPath = await generateTTS(aiResponse, guildId);
-                  if (ttsAudioPath) {
-                    try {
-                      const resource = createAudioResource(ttsAudioPath);
-                      connectionData.audioPlayer.play(resource);
-                      console.log(`[Listen] Playing TTS response in guild ${guildId}`);
-
-                      // Clean up TTS file after playback finishes
-                      connectionData.audioPlayer.once(AudioPlayerStatus.Idle, () => {
-                        try {
-                          if (fs.existsSync(ttsAudioPath)) {
-                            fs.unlinkSync(ttsAudioPath);
-                            console.log(`[Listen] Cleaned up TTS file: ${ttsAudioPath}`);
-                          }
-                        } catch (err) {
-                          console.error(`[Listen] Error cleaning up TTS file:`, err);
-                        }
-                      });
-                    } catch (error) {
-                      console.error(`[Listen] Error playing TTS audio:`, error);
-                      // Clean up on error
-                      if (fs.existsSync(ttsAudioPath)) {
-                        fs.unlinkSync(ttsAudioPath);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.error("Error processing audio:", error);
-            // Clean up on error
-            if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
-            if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-          }
+          connectionData.processingChain = connectionData.processingChain
+            .then(() => processRecordedAudio(guildId, userId, pcmFile, outputFile, bytesReceived, interaction))
+            .catch((err) => console.error('[Listen] Error in speaking processing chain:', err));
         });
       });
 
@@ -546,6 +487,142 @@ async function stopListening(
     await interaction.editReply({
       content: "Une erreur est survenue en quittant le salon vocal.",
     });
+  }
+}
+
+/**
+ * Validate, transcribe, and respond to one recorded utterance. This is the
+ * "heavy" part of the pipeline (touches the shared conversation history and
+ * the shared AudioPlayer for the guild), so callers must always run it
+ * through a guild's `processingChain` rather than calling it directly —
+ * otherwise overlapping speaking events can interleave their Mistral calls
+ * and audio playback.
+ */
+async function processRecordedAudio(
+  guildId: string,
+  userId: string,
+  pcmFile: string,
+  outputFile: string,
+  bytesReceived: number,
+  interaction: CommandInteraction
+): Promise<void> {
+  // Check if file exists and has content
+  if (!fs.existsSync(pcmFile)) {
+    console.log(`[Listen] PCM file does not exist: ${pcmFile}`);
+    return;
+  }
+
+  const fileStats = fs.statSync(pcmFile);
+  console.log(`[Listen] PCM file size: ${fileStats.size} bytes`);
+
+  // Check if we have enough audio data for meaningful speech
+  // 48kHz stereo 16-bit PCM = 192,000 bytes/second
+  // Minimum 1 second of audio = 192KB
+  const minBytes = 192000; // 1 second
+  if (fileStats.size < minBytes) {
+    console.log(`[Listen] PCM file too small (${fileStats.size} bytes, need ${minBytes}), likely just noise or short sound. Ignoring.`);
+    if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
+    return;
+  }
+
+  try {
+    // Get user info
+    const user = await interaction.client.users.fetch(userId);
+    console.log(`[Listen] Processing audio from ${user.username} (${bytesReceived} bytes decoded)`);
+
+    // Convert PCM to OGG/Opus optimized for Whisper
+    const conversionSuccess = await convertPcmToWhisperFormat(pcmFile, outputFile);
+
+    if (!conversionSuccess) {
+      console.error(`[Listen] Audio conversion failed for user ${userId}`);
+      // Clean up temp files
+      if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
+      if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+      return;
+    }
+
+    // Verify the output file exists and has reasonable size
+    if (!fs.existsSync(outputFile)) {
+      console.error(`[Listen] Converted OGG file does not exist: ${outputFile}`);
+      if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
+      return;
+    }
+
+    const oggStats = fs.statSync(outputFile);
+    console.log(`[Listen] Converted OGG file size: ${oggStats.size} bytes`);
+
+    // Check if converted file is too small (likely corrupted or just noise)
+    if (oggStats.size < 2000) {
+      console.log(`[Listen] Converted audio file too small (${oggStats.size} bytes), likely corrupted or just noise. Ignoring.`);
+      if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
+      if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+      return;
+    }
+
+    // Transcribe with OpenAI Whisper using OGG file
+    const transcription = await transcribeAudio(outputFile);
+
+    // Clean up temp files
+    if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
+    if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+
+    console.log(`[Listen] Transcription result for ${user.username}: ${transcription ? `"${transcription}"` : 'null/empty'}`);
+
+    if (!transcription) return;
+
+    // Re-fetch the connection data — some time has passed since we started,
+    // and it's the shared, mutable state this function's caller is
+    // serializing access to via the per-guild processing chain.
+    const connectionData = activeConnections.get(guildId);
+    if (!connectionData) return;
+
+    // Show transcription
+    await connectionData.channel.send(
+      `🎤 **${user.username}** : "${transcription}"`
+    );
+
+    // Get AI response
+    const aiResponse = await getMistralResponse(transcription, connectionData);
+
+    console.log(`[Listen] Mistral response for "${transcription}": ${aiResponse ? `"${aiResponse.substring(0, 100)}..."` : 'null/empty'}`);
+
+    if (!aiResponse) return;
+
+    // Show AI response in text
+    await connectionData.channel.send(`🤖 **Le Gnome** : ${aiResponse}`);
+
+    // Generate TTS audio and play it in voice channel
+    const ttsAudioPath = await generateTTS(aiResponse, guildId);
+    if (!ttsAudioPath) return;
+
+    try {
+      const resource = createAudioResource(ttsAudioPath);
+      connectionData.audioPlayer.play(resource);
+      console.log(`[Listen] Playing TTS response in guild ${guildId}`);
+
+      // Clean up TTS file after playback finishes
+      connectionData.audioPlayer.once(AudioPlayerStatus.Idle, () => {
+        try {
+          if (fs.existsSync(ttsAudioPath)) {
+            fs.unlinkSync(ttsAudioPath);
+            console.log(`[Listen] Cleaned up TTS file: ${ttsAudioPath}`);
+          }
+        } catch (err) {
+          console.error(`[Listen] Error cleaning up TTS file:`, err);
+        }
+      });
+    } catch (error) {
+      console.error(`[Listen] Error playing TTS audio:`, error);
+      // Clean up on error
+      if (fs.existsSync(ttsAudioPath)) {
+        fs.unlinkSync(ttsAudioPath);
+      }
+    }
+  } catch (error) {
+    console.error("Error processing audio:", error);
+    // Clean up on error
+    if (fs.existsSync(pcmFile)) fs.unlinkSync(pcmFile);
+    if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
   }
 }
 

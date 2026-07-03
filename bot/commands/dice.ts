@@ -56,46 +56,52 @@ export const command: Command = {
 
     await interaction.reply({ embeds: [rollingEmbed] });
 
-    // Simulate rolling delay
+    // Roll and settle the result immediately — the setTimeout below only
+    // delays the *visual* reveal for suspense. The payout must already be
+    // credited/debited before the delay starts so a crash during that window
+    // can never lose (or duplicate) coins that were charged up front.
+
+    // Roll two dice
+    const die1 = Math.floor(Math.random() * 6) + 1;
+    const die2 = Math.floor(Math.random() * 6) + 1;
+    const total = die1 + die2;
+
+    // Calculate payout based on difficulty
+    // Harder predictions (2, 12) have higher payouts
+    // Easier predictions (6, 7, 8) have lower payouts
+    const probabilities = {
+      2: 36,  // 1/36 chance - x36 payout
+      3: 18,  // 2/36 chance - x18 payout
+      4: 12,  // 3/36 chance - x12 payout
+      5: 9,   // 4/36 chance - x9 payout
+      6: 7,   // 5/36 chance - x7 payout
+      7: 6,   // 6/36 chance - x6 payout
+      8: 7,   // 5/36 chance - x7 payout
+      9: 9,   // 4/36 chance - x9 payout
+      10: 12, // 3/36 chance - x12 payout
+      11: 18, // 2/36 chance - x18 payout
+      12: 36  // 1/36 chance - x36 payout
+    };
+
+    const won = total === prediction;
+    const multiplier = probabilities[prediction as keyof typeof probabilities];
+    const payout = won ? bet * multiplier : 0;
+    const xpGain = won ? Math.floor(bet / 2) : 0;
+
+    try {
+      if (won && payout > 0) {
+        await userLevelsDb.addCoins(userId, guildId, payout);
+      }
+      if (xpGain > 0) {
+        await userLevelsDb.addXp(userId, guildId, xpGain);
+      }
+    } catch (error) {
+      console.error('[Dice] Error crediting payout:', error);
+    }
+
+    // Simulate rolling delay (cosmetic only — the payout above is already settled)
     setTimeout(async () => {
       try {
-        // Roll two dice
-        const die1 = Math.floor(Math.random() * 6) + 1;
-        const die2 = Math.floor(Math.random() * 6) + 1;
-        const total = die1 + die2;
-
-        // Calculate payout based on difficulty
-        // Harder predictions (2, 12) have higher payouts
-        // Easier predictions (6, 7, 8) have lower payouts
-        const probabilities = {
-          2: 36,  // 1/36 chance - x36 payout
-          3: 18,  // 2/36 chance - x18 payout
-          4: 12,  // 3/36 chance - x12 payout
-          5: 9,   // 4/36 chance - x9 payout
-          6: 7,   // 5/36 chance - x7 payout
-          7: 6,   // 6/36 chance - x6 payout
-          8: 7,   // 5/36 chance - x7 payout
-          9: 9,   // 4/36 chance - x9 payout
-          10: 12, // 3/36 chance - x12 payout
-          11: 18, // 2/36 chance - x18 payout
-          12: 36  // 1/36 chance - x36 payout
-        };
-
-        const won = total === prediction;
-        const multiplier = probabilities[prediction as keyof typeof probabilities];
-        const payout = won ? bet * multiplier : 0;
-        const xpGain = won ? Math.floor(bet / 2) : 0;
-
-        // Handle payout
-        if (won && payout > 0) {
-          await userLevelsDb.addCoins(userId, guildId, payout);
-        }
-        
-        // Handle XP gain
-        if (xpGain > 0) {
-          await userLevelsDb.addXp(userId, guildId, xpGain);
-        }
-
         // Create dice emojis
         const diceEmojis = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
         const die1Emoji = diceEmojis[die1 - 1];
@@ -121,9 +127,9 @@ export const command: Command = {
           );
 
         await interaction.editReply({ embeds: [resultEmbed] });
-        
+
       } catch (error) {
-        console.error('[Dice] Error processing result:', error);
+        console.error('[Dice] Error revealing result:', error);
         await interaction.editReply({
           content: '❌ Une erreur est survenue lors du traitement du résultat.',
           embeds: []

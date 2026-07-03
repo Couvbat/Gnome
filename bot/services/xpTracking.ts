@@ -32,7 +32,7 @@ export function initXpTracking(client: Client): void {
     messageXpCooldowns.set(cooldownKey, now);
 
     try {
-      // Award 15-25 XP per message (random for variety)
+      // Award 5-15 XP per message (random for variety)
       const xpGain = Math.floor(Math.random() * 11) + 5;
       
       const result = await userLevelsDb.addXp(userId, guildId, xpGain);
@@ -162,7 +162,7 @@ export function initXpTracking(client: Client): void {
 
   // Periodic cleanup for memory management
   const CLEANUP_INTERVAL = 15 * 60 * 1000; // 15 minutes
-  setInterval(() => {
+  setInterval(async () => {
     try {
       const now = Date.now();
       const oneHourAgo = now - 60 * 60 * 1000;
@@ -177,17 +177,43 @@ export function initXpTracking(client: Client): void {
         }
       });
 
-      // Clean up stale voice activity trackers (users who've been tracked for more than 6 hours)
+      // Voice trackers older than 6 hours used to be deleted outright, which
+      // silently discarded the whole session: a user who'd been in voice for
+      // longer than 6 hours would pay 0 XP when they eventually left, because
+      // their tracker (and its joinTime) was gone. Instead, pay out for the
+      // elapsed window now and roll the tracker forward — the user is still
+      // connected, so tracking must continue rather than end.
       const sixHoursAgo = now - 6 * 60 * 60 * 1000;
+      const staleEntries: Array<[string, { guildId: string; joinTime: number }]> = [];
       voiceActivityTracker.forEach((data, userId) => {
         if (data.joinTime < sixHoursAgo) {
-          voiceActivityTracker.delete(userId);
-          cleanedVoiceTrackers++;
+          staleEntries.push([userId, data]);
         }
       });
 
+      for (const [userId, data] of staleEntries) {
+        const minutesElapsed = Math.floor((now - data.joinTime) / 60000);
+        if (minutesElapsed > 0) {
+          try {
+            const xpGain = minutesElapsed * 5;
+            const result = await userLevelsDb.addXp(userId, data.guildId, xpGain);
+            await userLevelsDb.upsert({
+              userId,
+              guildId: data.guildId,
+              totalVoiceMinutes: (result.totalVoiceMinutes || 0) + minutesElapsed,
+              lastVoiceTimestamp: now,
+            });
+          } catch (error) {
+            console.error('[XP Tracking] Error paying out long-running voice session XP:', error);
+          }
+        }
+        // Roll the tracker forward instead of deleting it.
+        voiceActivityTracker.set(userId, { guildId: data.guildId, joinTime: now });
+        cleanedVoiceTrackers++;
+      }
+
       if (cleanedCooldowns > 0 || cleanedVoiceTrackers > 0) {
-        console.log(`[XP Tracking] Cleanup: removed ${cleanedCooldowns} old cooldowns and ${cleanedVoiceTrackers} stale voice trackers`);
+        console.log(`[XP Tracking] Cleanup: removed ${cleanedCooldowns} old cooldowns and rolled forward ${cleanedVoiceTrackers} long-running voice trackers`);
       }
     } catch (error) {
       console.error('[XP Tracking] Error during cleanup:', error);
