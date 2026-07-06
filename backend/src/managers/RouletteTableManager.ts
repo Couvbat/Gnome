@@ -393,10 +393,11 @@ export class RouletteTableManager {
   }
 
   /**
-   * Get table status
+   * Get table status (scoped to the caller's guild when provided, so one
+   * guild's members can't inspect another guild's tables)
    */
-  static async getTableStatus(tableId: string): Promise<any> {
-    const table = await RouletteTable.findOne({ tableId });
+  static async getTableStatus(tableId: string, guildId?: string): Promise<any> {
+    const table = await RouletteTable.findOne(guildId ? { tableId, guildId } : { tableId });
     if (!table) return null;
 
     const tableDoc = table as any;

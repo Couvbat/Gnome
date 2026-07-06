@@ -27,6 +27,9 @@ describe('EnergyService', () => {
   ) => {
     (CasinoProfile.findOne as Mock).mockResolvedValue(profile);
     (Character.findOne as Mock).mockResolvedValue(character);
+    // Atomic writes (CAS regen sync, conditional consume, clamped restore) go
+    // through updateOne - default to "the guarded write applied".
+    (CasinoProfile.updateOne as Mock).mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
   };
 
   describe('getEnergyInfo', () => {
@@ -137,6 +140,19 @@ describe('EnergyService', () => {
       // Energy should decrease after consumption
       expect(result.currentEnergy).toBeDefined();
       expect(typeof result.currentEnergy).toBe('number');
+    });
+
+    it('should fail when the conditional decrement loses a concurrent race', async () => {
+      const mockProfile = createMockCasinoProfile({ energy: 80 });
+      const mockCharacter = createMockCharacter('warrior', { userId: mockUserId, guildId: mockGuildId });
+      setupMocks(mockProfile, mockCharacter);
+      // Balance check passes, but by the time the guarded { energy: { $gte } }
+      // update runs, a concurrent spend has drained the energy.
+      (CasinoProfile.updateOne as Mock).mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
+
+      const result = await EnergyService.consumeEnergy(mockUserId, mockGuildId, 10);
+
+      expect(result.success).toBe(false);
     });
 
     it('should fail to consume energy when insufficient', async () => {

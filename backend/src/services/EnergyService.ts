@@ -81,9 +81,11 @@ export class EnergyService {
     regenRate: number
   ): Promise<number> {
     let casinoProfile = await CasinoProfile.findOne({ userId, guildId });
-    
+    let createdHere = false;
+
     // Create profile if it doesn't exist
     if (!casinoProfile) {
+      createdHere = true;
       // Get character to link to casino profile (optional - can play without character)
       const character = await Character.findOne({ userId, guildId });
       
@@ -124,20 +126,39 @@ export class EnergyService {
     }
 
     const now = new Date();
-    const lastRegen = (casinoProfile as any).lastEnergyRegen || now;
-    const currentEnergy = (casinoProfile as any).energy ?? maxEnergy;
+    // Raw field values as read, before any defaulting - the CAS guard below
+    // must match exactly what is stored (null matches a missing field).
+    const rawEnergy = (casinoProfile as any).energy;
+    const rawLastRegen = (casinoProfile as any).lastEnergyRegen;
+    const lastRegen = rawLastRegen || now;
+    const currentEnergy = rawEnergy ?? maxEnergy;
 
     // Calculate energy regenerated since last check
     const minutesPassed = Math.floor((now.getTime() - lastRegen.getTime()) / 60000);
     const energyRegenerated = minutesPassed * regenRate;
-    
+
     const newEnergy = Math.min(maxEnergy, currentEnergy + energyRegenerated);
 
-    // Update profile
     (casinoProfile as any).energy = newEnergy;
     (casinoProfile as any).maxEnergy = maxEnergy;
     (casinoProfile as any).lastEnergyRegen = now;
-    await casinoProfile.save();
+
+    if (createdHere) {
+      await casinoProfile.save();
+    } else {
+      // Compare-and-swap on the values we read: if a concurrent writer (a bet
+      // deducting energy, another regen tick) touched the profile since, skip
+      // the write instead of clobbering their update with our stale snapshot.
+      await CasinoProfile.updateOne(
+        {
+          userId,
+          guildId,
+          energy: rawEnergy === undefined ? null : rawEnergy,
+          lastEnergyRegen: rawLastRegen === undefined ? null : rawLastRegen
+        },
+        { $set: { energy: newEnergy, maxEnergy, lastEnergyRegen: now } }
+      );
+    }
 
     return newEnergy;
   }
@@ -150,8 +171,9 @@ export class EnergyService {
     guildId: string,
     amount: number
   ): Promise<{ success: boolean; currentEnergy: number; maxEnergy: number }> {
+    // getEnergyInfo also applies pending regeneration before we try to spend
     const energyInfo = await this.getEnergyInfo(userId, guildId);
-    
+
     if (energyInfo.current < amount) {
       return {
         success: false,
@@ -160,10 +182,20 @@ export class EnergyService {
       };
     }
 
-    const casinoProfile = await CasinoProfile.findOne({ userId, guildId });
-    if (casinoProfile) {
-      (casinoProfile as any).energy = energyInfo.current - amount;
-      await casinoProfile.save();
+    // Atomic conditional decrement (same pattern as EconomyService.spendCoins):
+    // the { energy: { $gte: amount } } filter makes the spend apply only while
+    // the balance is still sufficient, closing the check-then-save race.
+    const result = await CasinoProfile.updateOne(
+      { userId, guildId, energy: { $gte: amount } },
+      { $inc: { energy: -amount } }
+    );
+
+    if (!result || result.modifiedCount === 0) {
+      return {
+        success: false,
+        currentEnergy: energyInfo.current,
+        maxEnergy: energyInfo.max
+      };
     }
 
     return {
@@ -184,11 +216,23 @@ export class EnergyService {
     const energyInfo = await this.getEnergyInfo(userId, guildId);
     const newEnergy = Math.min(energyInfo.max, energyInfo.current + amount);
 
-    const casinoProfile = await CasinoProfile.findOne({ userId, guildId });
-    if (casinoProfile) {
-      (casinoProfile as any).energy = newEnergy;
-      await casinoProfile.save();
-    }
+    // Atomic increment clamped to max via an aggregation-pipeline update, so a
+    // concurrent deduction between our read and this write isn't overwritten.
+    await CasinoProfile.updateOne(
+      { userId, guildId },
+      [
+        {
+          $set: {
+            energy: {
+              $min: [
+                energyInfo.max,
+                { $add: [{ $ifNull: ['$energy', energyInfo.max] }, amount] }
+              ]
+            }
+          }
+        }
+      ]
+    );
 
     return {
       currentEnergy: newEnergy,

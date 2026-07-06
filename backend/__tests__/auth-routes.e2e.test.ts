@@ -211,6 +211,53 @@ describe('Auth API E2E Tests', () => {
     });
   });
 
+  describe('POST /api/auth/refresh - Token Refresh', () => {
+    it('should issue a new access token from a dedicated refresh token', async () => {
+      const loginResponse = await request(app)
+        .post('/api/auth/dev')
+        .send({ username: 'RefreshUser' });
+
+      expect(loginResponse.status).toBe(200);
+      expect(loginResponse.body.refreshToken).toBeDefined();
+      const refreshDecoded = jwt.verify(loginResponse.body.refreshToken, jwtSecret) as any;
+      expect(refreshDecoded.type).toBe('refresh');
+
+      const refreshResponse = await request(app)
+        .post('/api/auth/refresh')
+        .send({ refreshToken: loginResponse.body.refreshToken });
+
+      expect(refreshResponse.status).toBe(200);
+      const newAccess = jwt.verify(refreshResponse.body.token, jwtSecret) as any;
+      expect(newAccess.type).toBe('access');
+      expect(newAccess.userId).toBe('dev-user-demo');
+    });
+
+    it('should reject an access token used as a refresh token', async () => {
+      const loginResponse = await request(app)
+        .post('/api/auth/dev')
+        .send({ username: 'RefreshUser' });
+
+      // The 7-day access token must not be able to renew itself
+      const refreshResponse = await request(app)
+        .post('/api/auth/refresh')
+        .send({ refreshToken: loginResponse.body.token });
+
+      expect(refreshResponse.status).toBe(401);
+    });
+
+    it('should reject a refresh token used as an access token on /me', async () => {
+      const loginResponse = await request(app)
+        .post('/api/auth/dev')
+        .send({ username: 'RefreshUser' });
+
+      const meResponse = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${loginResponse.body.refreshToken}`);
+
+      expect(meResponse.status).toBe(401);
+    });
+  });
+
   describe('Authentication Flow E2E', () => {
     it('should complete full auth flow: dev login → JWT creation → token validation', async () => {
       // Step 1: Login with dev credentials

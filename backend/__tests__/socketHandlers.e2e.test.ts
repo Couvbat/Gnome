@@ -91,6 +91,12 @@ describe('Socket.IO casino handlers (e2e)', () => {
       expect(socket.connected).toBe(true);
       socket.disconnect();
     });
+
+    it('rejects a 30-day refresh token used as an access token', async () => {
+      await expect(
+        connect({ token: signToken({ type: 'refresh' }) })
+      ).rejects.toThrow(/Invalid authentication token/);
+    });
   });
 
   describe('roulette events', () => {
@@ -108,7 +114,8 @@ describe('Socket.IO casino handlers (e2e)', () => {
         socket.emit('roulette:join_table', { tableId: 'table-1' });
       });
 
-      expect(RouletteTableManager.getTableStatus).toHaveBeenCalledWith('table-1');
+      // Status lookups are scoped to the socket's authenticated guild
+      expect(RouletteTableManager.getTableStatus).toHaveBeenCalledWith('table-1', 'guild-1');
       expect(state).toEqual({ gamePhase: 'betting', activePlayers: 2 });
       // Betting round should not be (re)started for a live table that's not "waiting"
       expect(RouletteTableManager.startBettingRound).not.toHaveBeenCalled();

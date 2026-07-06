@@ -23,7 +23,12 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
       const jwtSecret = process.env.JWT_SECRET;
       if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
       const decoded = jwt.verify(token, jwtSecret) as any;
-      
+
+      // Refresh tokens are only valid on /api/auth/refresh
+      if (decoded.type === 'refresh') {
+        return next(new Error('Invalid authentication token'));
+      }
+
       socket.userId = decoded.userId;
       socket.guildId = decoded.guildId;
       socket.username = decoded.username;
@@ -49,7 +54,7 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
         const { tableId } = data;
         socket.join(`roulette:${tableId}`);
 
-        const status = await RouletteTableManager.getTableStatus(tableId);
+        const status = await RouletteTableManager.getTableStatus(tableId, socket.guildId);
         socket.emit('roulette:table_state', status);
 
         io.to(`roulette:${tableId}`).emit('roulette:player_joined', {
