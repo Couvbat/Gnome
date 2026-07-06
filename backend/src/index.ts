@@ -28,6 +28,12 @@ import { setupSocketHandlers } from './websocket/socketHandlers';
 dotenv.config();
 
 const app = express();
+
+// Production runs behind o2switch's Passenger/Apache proxy - without this,
+// req.ip is the proxy's address, so the per-IP rate limiter below lumps every
+// client into a single shared bucket (one abusive client locks everyone out).
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: {

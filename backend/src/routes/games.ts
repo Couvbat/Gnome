@@ -31,7 +31,10 @@ router.post('/slots/spin', async (req: AuthenticatedRequest, res, next) => {
       throw new AppError(`Maximum bet is ${MAX_BET} coins`, 400);
     }
 
-    const result = await SlotsEngine.spin(userId, guildId, bet, machineType || 'dragon');
+    // The requested machine type is the *theme* (5th parameter) - passing it as
+    // machineId (4th) silently fell through to the 'classic' symbol set.
+    const theme = machineType || 'dragon';
+    const result = await SlotsEngine.spin(userId, guildId, bet, theme, theme);
 
     res.json({
       success: true,

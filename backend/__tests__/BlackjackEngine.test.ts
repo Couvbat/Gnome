@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BlackjackEngine, type Card } from '../src/engines/BlackjackEngine';
 import { CasinoGameEngine } from '../src/engines/CasinoGameEngine';
+import { EconomyService } from '../src/services/EconomyService';
 
 const mockContext = {
   user: { userId: 'user1', guildId: 'guild1', coins: 1000 },
@@ -115,6 +116,9 @@ describe('BlackjackEngine', () => {
       expect(result.outcome).toBe('win');
       expect(result.playerHand.value).toBe(20);
       expect(result.dealerHand.value).toBe(18);
+      // Regression: a 1:1 win returns the stake plus equal winnings (2x bet) -
+      // paying back only the bet made every normal win net-zero.
+      expect(result.finalPayout).toBe(200);
     });
 
     it('player loses when dealer value is higher', async () => {
@@ -187,6 +191,57 @@ describe('BlackjackEngine', () => {
       expect(result.outcome).toBe('push');
       expect(result.gameType).toBe('push');
       expect(result.baseWinnings).toBe(100); // bet returned
+    });
+
+    it('double down charges the doubled stake and pays 2x on it', async () => {
+      // Player: 6+5 = 11, doubles and draws K = 21. Dealer: 10+8 = 18 (stands).
+      vi.spyOn(BlackjackEngine as any, 'createShuffledDeck').mockReturnValue(
+        deckFor([
+          card('6', 6),    // player card 1
+          card('5', 5),    // player card 2
+          card('10', 10),  // dealer up
+          card('8', 8),    // dealer hidden
+          card('K', 10),   // player's double-down card → 21
+        ])
+      );
+      // Player can afford the doubled stake
+      vi.spyOn(EconomyService, 'getCoins').mockResolvedValue(1000);
+
+      const result = await BlackjackEngine.playSinglePlayerBlackjack(
+        'user1', 'guild1', 100, 'double'
+      );
+      expect(result.doubleDowned).toBe(true);
+      expect(result.outcome).toBe('win');
+      // Doubled stake of 200 pays back 400 total
+      expect(result.finalPayout).toBe(400);
+      // The doubled stake (not the base bet) must be what gets charged
+      expect(CasinoGameEngine.processGameResult).toHaveBeenCalledWith(
+        'user1', 'guild1', 'blackjack', 200, expect.anything(), expect.anything()
+      );
+    });
+
+    it('downgrades double to hit when the player cannot afford the doubled stake', async () => {
+      // Player: 6+5 = 11, wants to double but only has 150 (< 200) → hits instead.
+      vi.spyOn(BlackjackEngine as any, 'createShuffledDeck').mockReturnValue(
+        deckFor([
+          card('6', 6),    // player card 1
+          card('5', 5),    // player card 2
+          card('10', 10),  // dealer up
+          card('8', 8),    // dealer hidden
+          card('K', 10),   // player draw → 21 (hit loop stops at >= 17)
+        ])
+      );
+      vi.spyOn(EconomyService, 'getCoins').mockResolvedValue(150);
+
+      const result = await BlackjackEngine.playSinglePlayerBlackjack(
+        'user1', 'guild1', 100, 'double'
+      );
+      expect(result.doubleDowned).toBe(false);
+      expect(result.outcome).toBe('win');
+      expect(result.finalPayout).toBe(200);
+      expect(CasinoGameEngine.processGameResult).toHaveBeenCalledWith(
+        'user1', 'guild1', 'blackjack', 100, expect.anything(), expect.anything()
+      );
     });
 
     it('respects explicit stand strategy: player does not draw', async () => {

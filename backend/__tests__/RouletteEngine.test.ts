@@ -107,6 +107,7 @@ describe('RouletteEngine', () => {
       expect(result.outcome).toBe('win');
       // payout: 100 * (1 + 1) = 200
       expect(result.baseWinnings).toBe(200);
+      expect(result.finalPayout).toBe(200);
     });
 
     it('red bet loses when wheel lands on green (0)', async () => {
@@ -118,6 +119,9 @@ describe('RouletteEngine', () => {
       expect(result.winningColor).toBe('green');
       expect(result.winningBets).toHaveLength(0);
       expect(result.outcome).toBe('loss');
+      // Regression: a plain loss must pay out 0 - the stake is charged by
+      // processGameResult and must NOT come back as a refund.
+      expect(result.finalPayout).toBe(0);
     });
 
     it('straight bet wins on exact number match (35:1 payout → jackpot)', async () => {

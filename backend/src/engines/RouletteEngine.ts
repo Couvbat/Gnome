@@ -120,12 +120,16 @@ export class RouletteEngine extends CasinoGameEngine {
       socialBonus = Math.floor(baseWinnings * 0.1);
     }
 
-    // Paladin divine luck - convert small losses to pushes
-    if (outcome === 'loss' && context.characterBonus.className === 'paladin' && totalBet <= 100) {
-      const protection = await this.triggerPaladinDivineBlessing(context, totalBet, totalBet);
-      if (protection < totalBet) {
-        outcome = 'push';
-        baseWinnings = protection;
+    // Loss-reduction abilities track how much of the stake is actually lost;
+    // the difference (totalBet - actualLoss) is refunded via finalPayout below.
+    let actualLoss = totalBet;
+
+    // Paladin divine blessing - reduce large losses (the trigger only reduces
+    // losses over 100 coins, so no extra bet-size gate here)
+    if (outcome === 'loss' && context.characterBonus.className === 'paladin') {
+      const protectedLoss = await this.triggerPaladinDivineBlessing(context, totalBet, actualLoss);
+      if (protectedLoss < actualLoss) {
+        actualLoss = protectedLoss;
         specialAbilityTriggered = 'paladin_divine_blessing';
       }
     }
@@ -146,10 +150,10 @@ export class RouletteEngine extends CasinoGameEngine {
     }
 
     // Rogue probability manipulation
-    let actualLoss = totalBet;
     if (outcome === 'loss' && context.characterBonus.className === 'rogue' && totalBet >= 50) {
-      actualLoss = await this.triggerRogueSleightOfHand(context, totalBet);
-      if (actualLoss < totalBet) {
+      const reducedLoss = await this.triggerRogueSleightOfHand(context, totalBet);
+      if (reducedLoss < actualLoss) {
+        actualLoss = reducedLoss;
         specialAbilityTriggered = 'rogue_probability_twist';
       }
     }
@@ -168,7 +172,9 @@ export class RouletteEngine extends CasinoGameEngine {
       outcome,
       baseWinnings,
       bonusMultiplier,
-      finalPayout: outcome === 'loss' ? actualLoss : baseWinnings,
+      // On a loss only the ability-protected portion of the stake comes back
+      // (0 for a plain loss) - the full stake is charged by processGameResult.
+      finalPayout: outcome === 'loss' ? totalBet - actualLoss : baseWinnings,
       xpGained: this.calculateXpGain(totalBet, outcome, context.character?.level || 1) * xpMultiplier,
       specialAbilityTriggered,
       characterBonus: context.characterBonus,
@@ -506,7 +512,10 @@ export class RouletteEngine extends CasinoGameEngine {
         bet.numbers.includes(winningNumber)
       );
 
-      let totalBet = playerBetData.bets.reduce((sum: number, bet: { amount: number }) => sum + bet.amount, 0);
+      // The stake was already charged atomically at placeBet time
+      // (RouletteTableManager.placeBet -> EconomyService.spendCoins), so
+      // settlement below only ever *credits* what the player is owed.
+      const totalBet = playerBetData.bets.reduce((sum: number, bet: { amount: number }) => sum + bet.amount, 0);
       let totalWon = 0;
       let baseWinnings = 0;
 
@@ -534,12 +543,14 @@ export class RouletteEngine extends CasinoGameEngine {
       // Apply character bonuses - same mechanics as playSinglePlayerRoulette, via the shared triggers
       let specialAbility: string | null = null;
 
-      // Paladin divine luck - convert small losses to pushes
-      if (outcome === 'loss' && characterClass === 'paladin' && totalBet <= 100) {
-        const protection = await this.triggerPaladinDivineBlessing(abilityContext, totalBet, totalBet);
-        if (protection < totalBet) {
-          outcome = 'push';
-          totalBet = protection;
+      // Loss-reduction abilities refund part of the already-charged stake
+      let actualLoss = outcome === 'loss' ? totalBet : 0;
+
+      // Paladin divine blessing - reduce large losses
+      if (outcome === 'loss' && characterClass === 'paladin') {
+        const protectedLoss = await this.triggerPaladinDivineBlessing(abilityContext, totalBet, actualLoss);
+        if (protectedLoss < actualLoss) {
+          actualLoss = protectedLoss;
           specialAbility = 'paladin_divine_blessing';
         }
       }
@@ -559,9 +570,9 @@ export class RouletteEngine extends CasinoGameEngine {
 
       // Rogue probability manipulation
       if (outcome === 'loss' && characterClass === 'rogue' && totalBet >= 50) {
-        const actualLoss = await this.triggerRogueSleightOfHand(abilityContext, totalBet);
-        if (actualLoss < totalBet) {
-          totalBet = actualLoss;
+        const reducedLoss = await this.triggerRogueSleightOfHand(abilityContext, totalBet);
+        if (reducedLoss < actualLoss) {
+          actualLoss = reducedLoss;
           specialAbility = 'rogue_probability_twist';
         }
       }
@@ -577,11 +588,17 @@ export class RouletteEngine extends CasinoGameEngine {
       const betTypes = new Set(winningBets.map((b: RouletteBet) => b.type));
       const xpMultiplier = (characterClass === 'mage' && betTypes.size >= 2) ? 2.0 : 1.0;
 
-      // Calculate net change
-      const netChange = totalWon - totalBet;
+      // Amount owed back to the player: winnings (which already include the
+      // returned stake of winning bets) plus any ability-protected refund.
+      // The stake itself was charged at placeBet, so never deduct here -
+      // settling the net delta would double-charge losing players.
+      const lossRefund = outcome === 'loss' ? totalBet - actualLoss : 0;
+      const payout = totalWon + lossRefund;
+      const netChange = payout - totalBet;
 
-      // Update player balance in database
-      await EconomyService.addCoins(userId, guildId, netChange);
+      if (payout > 0) {
+        await EconomyService.addCoins(userId, guildId, payout);
+      }
 
       // Award XP (Character is the single owner of level/xp progression)
       if (character) {
@@ -597,7 +614,7 @@ export class RouletteEngine extends CasinoGameEngine {
       // Track results
       playerResults.set(userId, {
         won: totalWon,
-        lost: winningBets.length === 0 ? totalBet : 0,
+        lost: actualLoss,
         netChange
       });
 
@@ -611,31 +628,45 @@ export class RouletteEngine extends CasinoGameEngine {
         totalPayouts += netChange;
       }
 
-      // Log to casino game log
-      const { CasinoGameLog } = await import('../models/schemas');
-      await CasinoGameLog.create({
-        userId,
-        guildId,
-        gameType: 'roulette_multiplayer',
-        betAmount: totalBet,
-        payout: netChange,
-        outcome: netChange > 0 ? 'win' : 'loss',
-        details: {
+      // Log to casino game log. A logging failure must never abort settlement
+      // for the remaining players, so it is contained per-player.
+      try {
+        const { CasinoGameLog } = await import('../models/schemas');
+        await CasinoGameLog.create({
+          logId: `roulette_${tableId}_${Date.now()}_${userId}`,
+          userId,
+          guildId,
+          characterId: character?._id || null,
+          sessionId: session?.sessionId || `session_${userId}`,
+          gameType: 'roulette',
           tableId,
-          winningNumber,
-          winningColor,
-          bets: playerBetData.bets.map((b: { type: string; amount: number }, index: number) => ({
-            type: b.type,
-            amount: b.amount,
-            // Check if the corresponding parsed bet is in the winning bets array
-            won: parsedBets[index] && winningBets.includes(parsedBets[index])
-          })),
-          characterBonus: specialAbility,
-          bardBoost: playerBardBoost,
-          xpMultiplier
-        },
-        timestamp: new Date()
-      });
+          gameId: `game_${Date.now()}`,
+          bet: totalBet,
+          result: outcome === 'push' ? 'push' : netChange > 0 ? 'win' : 'loss',
+          payout,
+          netChange,
+          gameData: {
+            multiplayer: true,
+            winningNumber,
+            winningColor,
+            bets: playerBetData.bets.map((b: { type: string; amount: number }, index: number) => ({
+              type: b.type,
+              amount: b.amount,
+              // Check if the corresponding parsed bet is in the winning bets array
+              won: parsedBets[index] && winningBets.includes(parsedBets[index])
+            })),
+            characterBonus: specialAbility,
+            bardBoost: playerBardBoost,
+            xpMultiplier
+          },
+          characterClass,
+          characterLevel: character?.level || 1,
+          characterLuck: playerLuck,
+          bonuses: []
+        });
+      } catch (logError) {
+        console.error(`[RouletteEngine] Failed to log multiplayer result for ${userId}:`, logError);
+      }
     }
 
     // Update table history using lastResults array

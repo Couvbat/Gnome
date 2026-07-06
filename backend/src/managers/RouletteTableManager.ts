@@ -61,6 +61,19 @@ export class RouletteTableManager {
 
       const tableDoc = table as any;
 
+      // Refund any lingering staked bets before clearing them. In the normal
+      // round chain the engine already settled and cleared them, so this only
+      // fires for stale state (e.g. a server restart mid-betting) where the
+      // coins were charged at placeBet but the spin never resolved.
+      if (Array.isArray(tableDoc.bets)) {
+        for (const staleBet of tableDoc.bets) {
+          if (staleBet?.userId && staleBet.totalWagered > 0) {
+            await EconomyService.addCoins(staleBet.userId, tableDoc.guildId, staleBet.totalWagered);
+            console.log(`[RouletteTableManager] Refunded stale bet of ${staleBet.totalWagered} to ${staleBet.userId} on table ${tableId}`);
+          }
+        }
+      }
+
       // Update table state
       tableDoc.gamePhase = 'betting';
       tableDoc.spinStartTime = new Date(Date.now() + 30000); // 30 seconds from now
@@ -268,8 +281,22 @@ export class RouletteTableManager {
       // Wait for payout display (10 seconds)
       await new Promise(resolve => setTimeout(resolve, 10000));
 
-      // Start next round
-      await this.startBettingRound(tableId, io);
+      // Stop the cycle when nobody is connected to the table room anymore,
+      // otherwise the betting/spin loop keeps hammering the DB forever on an
+      // empty table. The next roulette:join_table restarts it.
+      const roomSize = io?.sockets?.adapter?.rooms?.get(`roulette:${tableId}`)?.size ?? 0;
+      if (roomSize === 0) {
+        tableDoc.gamePhase = 'waiting';
+        await table.save();
+        console.log(`[RouletteTableManager] Table ${tableId} idle (no connected players), pausing rounds`);
+        return;
+      }
+
+      // Chain the next round only after this call releases the table lock -
+      // awaiting startBettingRound inline would see our own lock and skip,
+      // leaving the table stuck in the 'payouts' phase forever.
+      const nextRound = setTimeout(() => this.startBettingRound(tableId, io), 0);
+      this.timers.set(tableId, nextRound);
     } catch (error) {
       console.error('Error executing roulette spin:', error);
       
@@ -354,6 +381,15 @@ export class RouletteTableManager {
       guildId ? { tableId, guildId } : { tableId },
       { isActive: false }
     );
+  }
+
+  /**
+   * Whether this process has any scheduled timer for the table. Used to detect
+   * tables stranded mid-cycle by a server restart (phase says betting/spinning/
+   * payouts but no timer exists to ever advance it).
+   */
+  static hasActiveTimer(tableId: string): boolean {
+    return this.timers.has(tableId);
   }
 
   /**

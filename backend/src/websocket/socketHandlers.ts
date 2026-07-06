@@ -60,7 +60,10 @@ export const setupSocketHandlers = (io: SocketIOServer) => {
 
         // Kick off the first betting round once someone shows up at a fresh table.
         // Subsequent rounds are chained automatically by executeSpin/resetTable.
-        if (status?.gamePhase === 'waiting') {
+        // Also restart tables stranded mid-cycle by a server restart: the phase
+        // says betting/spinning/payouts but no timer exists in this process to
+        // ever advance it (startBettingRound refunds any stale charged bets).
+        if (status && (status.gamePhase === 'waiting' || !RouletteTableManager.hasActiveTimer(tableId))) {
           await RouletteTableManager.startBettingRound(tableId, io);
         }
       } catch (error: any) {

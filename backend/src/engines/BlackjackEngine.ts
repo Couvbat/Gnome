@@ -159,15 +159,24 @@ export class BlackjackEngine extends CasinoGameEngine {
       context.characterBonus.className
     );
 
-    if (strategy) {
-      // Player provided strategy
-      finalPlayerHand = await this.executePlayerStrategy(strategy, playerHand, deck, bet);
-      doubleDowned = strategy === 'double';
-    } else {
-      // Auto-play with character strategy
-      finalPlayerHand = await this.executePlayerStrategy(recommendedAction, playerHand, deck, bet);
-      doubleDowned = recommendedAction === 'double';
+    let chosenAction = strategy || recommendedAction;
+
+    // Doubling down doubles the stake - downgrade to a plain hit when the
+    // player can't actually cover the doubled bet, instead of failing the
+    // whole game at charge time in processGameResult.
+    if (chosenAction === 'double') {
+      const balance = await EconomyService.getCoins(userId, guildId);
+      if (balance < bet * 2) {
+        chosenAction = 'hit';
+      }
     }
+
+    finalPlayerHand = await this.executePlayerStrategy(chosenAction, playerHand, deck, bet);
+    doubleDowned = chosenAction === 'double' && finalPlayerHand.cards.length === 3;
+
+    // The doubled stake is what processGameResult charges and what payouts
+    // are computed against - a double down risks 2x to win 2x.
+    const totalStake = doubleDowned ? bet * 2 : bet;
 
     // Dealer plays
     let finalDealerHand = dealerHand;
@@ -186,19 +195,19 @@ export class BlackjackEngine extends CasinoGameEngine {
     } else if (finalDealerHand.isBusted) {
       outcome = 'win';
       gameType = 'dealer_bust';
-      baseWinnings = bet * (doubleDowned ? 2 : 1);
+      baseWinnings = totalStake * 2; // Stake returned + 1:1 winnings
     } else {
       const playerValue = finalPlayerHand.value;
       const dealerValue = finalDealerHand.value;
-      
+
       if (playerValue > dealerValue) {
         outcome = 'win';
         gameType = 'blackjack';
-        baseWinnings = bet * (doubleDowned ? 2 : 1);
+        baseWinnings = totalStake * 2; // Stake returned + 1:1 winnings
       } else if (playerValue === dealerValue) {
         outcome = 'push';
         gameType = 'push';
-        baseWinnings = bet; // Return bet
+        baseWinnings = totalStake; // Return stake
       } else {
         outcome = 'loss';
         gameType = 'blackjack';
@@ -209,22 +218,23 @@ export class BlackjackEngine extends CasinoGameEngine {
     let bonusMultiplier = 1.0;
     let specialAbilityTriggered = bonusInfo;
 
-    // Rogue sleight of hand (reduce losses)
-    let actualBetLoss = bet;
+    // Rogue sleight of hand (reduce losses): refund the protected part of the
+    // stake - the full stake is charged by processGameResult.
+    let actualBetLoss = totalStake;
     if (outcome === 'loss' && context.characterBonus.className === 'rogue') {
-      actualBetLoss = await this.triggerRogueSleightOfHand(context, bet);
-      if (actualBetLoss < bet) {
-        baseWinnings = actualBetLoss; // Reduced loss
+      actualBetLoss = await this.triggerRogueSleightOfHand(context, totalStake);
+      if (actualBetLoss < totalStake) {
+        baseWinnings = totalStake - actualBetLoss; // Refund of the protected portion
         specialAbilityTriggered = 'rogue_sleight_of_hand';
       }
     }
 
-    // Paladin divine protection
+    // Paladin divine protection (reduces large losses by 30%)
     if (outcome === 'loss' && context.characterBonus.className === 'paladin') {
-      const protectedBet = await this.triggerPaladinDivineBlessing(context, bet, actualBetLoss);
-      if (protectedBet < actualBetLoss) {
-        outcome = 'push'; // Convert loss to push
-        baseWinnings = protectedBet;
+      const protectedLoss = await this.triggerPaladinDivineBlessing(context, totalStake, actualBetLoss);
+      if (protectedLoss < actualBetLoss) {
+        actualBetLoss = protectedLoss;
+        baseWinnings = totalStake - actualBetLoss; // Refund of the protected portion
         specialAbilityTriggered = 'paladin_divine_blessing';
       }
     }
@@ -255,7 +265,7 @@ export class BlackjackEngine extends CasinoGameEngine {
       baseWinnings,
       bonusMultiplier,
       finalPayout: baseWinnings,
-      xpGained: this.calculateXpGain(bet, outcome, context.character?.level || 1) * xpMultiplier,
+      xpGained: this.calculateXpGain(totalStake, outcome, context.character?.level || 1) * xpMultiplier,
       specialAbilityTriggered,
       characterBonus: context.characterBonus,
       playerHand: finalPlayerHand,
@@ -264,7 +274,9 @@ export class BlackjackEngine extends CasinoGameEngine {
       doubleDowned
     };
 
-    return await this.processGameResult(userId, guildId, 'blackjack', bet, result, {
+    // totalStake (not the base bet) is charged so a double down actually
+    // risks the doubled amount it pays out on.
+    return await this.processGameResult(userId, guildId, 'blackjack', totalStake, result, {
       playerCards: finalPlayerHand.cards.map(c => `${c.rank}${c.suit[0]}`),
       dealerCards: finalDealerHand.cards.map(c => `${c.rank}${c.suit[0]}`),
       playerValue: finalPlayerHand.value,
@@ -777,22 +789,24 @@ export class BlackjackEngine extends CasinoGameEngine {
         payout = 0;
       }
 
-      // Same mechanics as playSinglePlayerBlackjack, via the shared CasinoGameEngine triggers
+      // Same mechanics as playSinglePlayerBlackjack, via the shared CasinoGameEngine
+      // triggers. The stake was charged at placeBet, so on a reduced loss the payout
+      // is the *refunded* portion of the stake (stake - actual loss).
       if (outcome === 'loss') {
         let actualBetLoss = bet;
 
         // Rogue sleight of hand (reduce losses)
         actualBetLoss = await this.triggerRogueSleightOfHand(abilityContext, bet);
         if (actualBetLoss < bet) {
-          payout = actualBetLoss;
+          payout = bet - actualBetLoss;
           characterBonus = 'rogue_sleight_of_hand';
         }
 
-        // Paladin divine protection
-        const protectedBet = await this.triggerPaladinDivineBlessing(abilityContext, bet, actualBetLoss);
-        if (protectedBet < actualBetLoss) {
-          outcome = 'push';
-          payout = protectedBet;
+        // Paladin divine protection (reduces large losses by 30%)
+        const protectedLoss = await this.triggerPaladinDivineBlessing(abilityContext, bet, actualBetLoss);
+        if (protectedLoss < actualBetLoss) {
+          actualBetLoss = protectedLoss;
+          payout = bet - actualBetLoss;
           characterBonus = 'paladin_divine_blessing';
         }
       }
@@ -838,26 +852,40 @@ export class BlackjackEngine extends CasinoGameEngine {
         }
       }
 
-      // Log game result
-      await CasinoGameLog.create({
-        userId: player.userId,
-        guildId,
-        gameType: 'blackjack_multiplayer',
-        betAmount: bet,
-        payout: netChange,
-        outcome: outcome === 'push' ? 'push' : (netChange > 0 ? 'win' : 'loss'),
-        details: {
+      // Log game result. A logging failure must never abort settlement for the
+      // remaining players, so it is contained per-player.
+      try {
+        await CasinoGameLog.create({
+          logId: `blackjack_${tableId}_${Date.now()}_${player.userId}`,
+          userId: player.userId,
+          guildId,
+          characterId: character?._id || null,
+          sessionId: `session_${player.userId}`,
+          gameType: 'blackjack',
           tableId,
-          playerHand: player.hand,
-          playerValue,
-          dealerHand: table.dealer.hand,
-          dealerValue,
-          dealerBusted,
-          characterBonus,
-          bardBoost: playerBardBoost
-        },
-        timestamp: new Date()
-      });
+          gameId: `game_${Date.now()}`,
+          bet,
+          result: outcome === 'push' ? 'push' : (netChange > 0 ? 'win' : 'loss'),
+          payout,
+          netChange,
+          gameData: {
+            multiplayer: true,
+            playerHand: player.hand,
+            playerValue,
+            dealerHand: table.dealer.hand,
+            dealerValue,
+            dealerBusted,
+            characterBonus,
+            bardBoost: playerBardBoost
+          },
+          characterClass,
+          characterLevel: character?.level || 1,
+          characterLuck: character?.stats?.luck || 0,
+          bonuses: []
+        });
+      } catch (logError) {
+        console.error(`[BlackjackEngine] Failed to log multiplayer result for ${player.userId}:`, logError);
+      }
 
       playerResults.push({
         userId: player.userId,
