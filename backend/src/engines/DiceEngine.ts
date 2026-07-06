@@ -20,7 +20,7 @@ export interface DicePrediction {
 export class DiceEngine extends CasinoGameEngine {
   private static readonly PREDICTION_TYPES: DicePrediction[] = [
     { type: 'low', value: 'low', multiplier: 2, description: 'Total 2-6 (2x payout)' },
-    { type: 'high', value: 'high', multiplier: 2, description: 'Total 7-12 (2x payout)' },
+    { type: 'high', value: 'high', multiplier: 2, description: 'Total 8-12 (2x payout)' },
     { type: 'exact', value: 7, multiplier: 5, description: 'Exact 7 (5x payout)' },
     { type: 'exact', value: 2, multiplier: 30, description: 'Snake Eyes (30x payout)' },
     { type: 'exact', value: 12, multiplier: 30, description: 'Boxcars (30x payout)' },
@@ -110,9 +110,11 @@ export class DiceEngine extends CasinoGameEngine {
       specialAbilityTriggered = specialAbilityTriggered || 'mage_arcane_insight';
     }
 
-    // Calculate final payout and XP (on a loss, payout is 0)
-    const finalPayout = outcome === 'loss' ? 0 : baseWinnings;
-    const xpGained = this.calculateXpGain(bet, outcome, context.character?.level || 1) * xpMultiplier;
+    // Calculate final payout and XP. The full bet is charged by processGameResult,
+    // so on a loss the payout is the ability-protected refund (bet - actualBetLoss,
+    // 0 for a plain loss) - otherwise Rogue/Paladin loss reduction would be a no-op.
+    const finalPayout = outcome === 'loss' ? bet - actualBetLoss : baseWinnings;
+    const xpGained = Math.floor(this.calculateXpGain(bet, outcome, context.character?.level || 1) * xpMultiplier);
 
     const result: DiceGameResult = {
       outcome,
@@ -217,10 +219,13 @@ export class DiceEngine extends CasinoGameEngine {
     dice: [number, number],
     prediction: DicePrediction
   ): boolean {
+    // High is 8-12 and low is 2-6: a 7 loses both, giving the house its edge.
+    // (With high = 7-12 the bet would win 21/36 of the time at 2x - a player-
+    // positive game that lets anyone drain the shared economy.)
     switch (prediction.type) {
       case 'high':
-        return total >= 7;
-      
+        return total >= 8;
+
       case 'low':
         return total <= 6;
       

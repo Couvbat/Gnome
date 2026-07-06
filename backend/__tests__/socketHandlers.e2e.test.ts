@@ -91,6 +91,12 @@ describe('Socket.IO casino handlers (e2e)', () => {
       expect(socket.connected).toBe(true);
       socket.disconnect();
     });
+
+    it('rejects a 30-day refresh token used as an access token', async () => {
+      await expect(
+        connect({ token: signToken({ type: 'refresh' }) })
+      ).rejects.toThrow(/Invalid authentication token/);
+    });
   });
 
   describe('roulette events', () => {
@@ -99,6 +105,8 @@ describe('Socket.IO casino handlers (e2e)', () => {
         gamePhase: 'betting',
         activePlayers: 2,
       });
+      // A live mid-round table has a scheduled timer in this process
+      (RouletteTableManager.hasActiveTimer as Mock).mockReturnValue(true);
 
       const socket = await connect({ token: signToken() });
       const state = await new Promise((resolve) => {
@@ -106,10 +114,31 @@ describe('Socket.IO casino handlers (e2e)', () => {
         socket.emit('roulette:join_table', { tableId: 'table-1' });
       });
 
-      expect(RouletteTableManager.getTableStatus).toHaveBeenCalledWith('table-1');
+      // Status lookups are scoped to the socket's authenticated guild
+      expect(RouletteTableManager.getTableStatus).toHaveBeenCalledWith('table-1', 'guild-1');
       expect(state).toEqual({ gamePhase: 'betting', activePlayers: 2 });
-      // Betting round should not be (re)started for a table that's not "waiting"
+      // Betting round should not be (re)started for a live table that's not "waiting"
       expect(RouletteTableManager.startBettingRound).not.toHaveBeenCalled();
+
+      socket.disconnect();
+    });
+
+    it('restarts the round for a table stranded mid-cycle (no timer in this process)', async () => {
+      (RouletteTableManager.getTableStatus as Mock).mockResolvedValue({
+        gamePhase: 'payouts',
+        activePlayers: 1,
+      });
+      // e.g. after a server restart: phase says mid-round but no timer exists
+      (RouletteTableManager.hasActiveTimer as Mock).mockReturnValue(false);
+      (RouletteTableManager.startBettingRound as Mock).mockResolvedValue(undefined);
+
+      const socket = await connect({ token: signToken() });
+      await new Promise((resolve) => {
+        socket.on('roulette:table_state', resolve);
+        socket.emit('roulette:join_table', { tableId: 'table-stranded' });
+      });
+
+      expect(RouletteTableManager.startBettingRound).toHaveBeenCalledWith('table-stranded', io);
 
       socket.disconnect();
     });

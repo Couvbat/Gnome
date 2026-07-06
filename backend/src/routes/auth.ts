@@ -10,11 +10,38 @@ const NEW_PLAYER_WELCOME_BONUS = 900;
 
 const router = Router();
 
+interface SessionClaims {
+  userId: string;
+  guildId: string;
+  discordId: string;
+  username: string;
+}
+
+function requireJwtSecret(): string {
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
+  return jwtSecret;
+}
+
+function signAccessToken(claims: SessionClaims): string {
+  return jwt.sign({ ...claims, type: 'access' }, requireJwtSecret(), { expiresIn: '7d' });
+}
+
+// Refresh tokens carry a distinct `type` claim: the auth middlewares reject
+// them as access tokens, and /refresh rejects anything without it - so a
+// stolen access token can't be laundered into an indefinitely renewable one.
+function signRefreshToken(claims: SessionClaims): string {
+  return jwt.sign({ ...claims, type: 'refresh' }, requireJwtSecret(), { expiresIn: '30d' });
+}
+
 // POST /api/auth/dev - Development mode authentication (no Discord token required)
 router.post('/dev', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Only allow in development mode
-    if (process.env.NODE_ENV === 'production') {
+    // Fail closed: only explicitly-declared development/test environments may
+    // use this. Gating on "not production" left the endpoint wide open on any
+    // deployment where NODE_ENV simply wasn't set.
+    const env = process.env.NODE_ENV;
+    if (env !== 'development' && env !== 'test') {
       throw new AppError('Development authentication not allowed in production', 403);
     }
 
@@ -22,23 +49,19 @@ router.post('/dev', async (req: Request, res: Response, next: NextFunction) => {
     const userId = 'dev-user-demo'; // Fixed demo user ID
     const guildId = 'dev-guild';
 
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
-    const token = jwt.sign(
-      {
-        userId,
-        guildId,
-        discordId: userId,
-        username: username || 'Demo User'
-      },
-      jwtSecret,
-      { expiresIn: '7d' }
-    );
+    const claims: SessionClaims = {
+      userId,
+      guildId,
+      discordId: userId,
+      username: username || 'Demo User'
+    };
+    const token = signAccessToken(claims);
 
     res.json({
       success: true,
       message: 'Development authentication successful',
       token,
+      refreshToken: signRefreshToken(claims),
       user: {
         id: userId,
         userId,
@@ -146,23 +169,18 @@ router.post('/discord', async (req: Request, res: Response, next: NextFunction) 
       throw new AppError('You are not a member of the specified guild', 401);
     }
 
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
-    const token = jwt.sign(
-      {
-        userId: discordUser.id,
-        guildId,
-        discordId: discordUser.id,
-        username: discordUser.global_name || discordUser.username
-      },
-      jwtSecret,
-      { expiresIn: '7d' }
-    );
+    const claims: SessionClaims = {
+      userId: discordUser.id,
+      guildId,
+      discordId: discordUser.id,
+      username: discordUser.global_name || discordUser.username
+    };
 
     res.json({
       success: true,
       message: 'Authentication successful',
-      token,
+      token: signAccessToken(claims),
+      refreshToken: signRefreshToken(claims),
       user: {
         userId: discordUser.id,
         guildId,
@@ -183,24 +201,24 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       throw new AppError('Refresh token required', 400);
     }
 
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
-    const decoded = jwt.verify(refreshToken, jwtSecret) as any;
+    const decoded = jwt.verify(refreshToken, requireJwtSecret()) as any;
 
-    const newToken = jwt.sign(
-      {
-        userId: decoded.userId,
-        guildId: decoded.guildId,
-        discordId: decoded.discordId,
-        username: decoded.username
-      },
-      jwtSecret,
-      { expiresIn: '7d' }
-    );
+    // Only dedicated refresh tokens may mint new access tokens - accepting
+    // any valid JWT here let a stolen 7-day access token renew itself forever.
+    if (decoded.type !== 'refresh') {
+      throw new AppError('Invalid refresh token', 401);
+    }
+
+    const claims: SessionClaims = {
+      userId: decoded.userId,
+      guildId: decoded.guildId,
+      discordId: decoded.discordId,
+      username: decoded.username
+    };
 
     res.json({
       success: true,
-      token: newToken
+      token: signAccessToken(claims)
     });
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
@@ -220,9 +238,12 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
       throw new AppError('Access token required', 401);
     }
 
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
-    const decoded = jwt.verify(token, jwtSecret) as any;
+    const decoded = jwt.verify(token, requireJwtSecret()) as any;
+
+    // Refresh tokens are only valid on /refresh, never as an access token
+    if (decoded.type === 'refresh') {
+      throw new AppError('Invalid access token', 401);
+    }
 
     // Fetch user from database
     let user = await User.findOne({ userId: decoded.userId, guildId: decoded.guildId });

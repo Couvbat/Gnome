@@ -27,6 +27,12 @@ export const authMiddleware = async (
     if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
     const decoded = jwt.verify(token, jwtSecret) as any;
 
+    // Refresh tokens (30-day lifetime) are only valid on /api/auth/refresh -
+    // accepting them here would make them long-lived access tokens.
+    if (decoded.type === 'refresh') {
+      return next(new AppError('Invalid access token', 401));
+    }
+
     // For Discord Activity, we expect the token to contain Discord user info
     if (!decoded.userId || !decoded.guildId) {
       return next(new AppError('Invalid token format', 401));
@@ -67,6 +73,10 @@ export const discordAuthMiddleware = async (
       const jwtSecret = process.env.JWT_SECRET;
       if (!jwtSecret) throw new Error('JWT_SECRET environment variable is required');
       const payload = jwt.verify(discordToken, jwtSecret) as any;
+
+      if (payload.type === 'refresh') {
+        return next(new AppError('Invalid or expired Discord token', 401));
+      }
 
       req.user = {
         userId: payload.userId || payload.user?.id || payload.sub,

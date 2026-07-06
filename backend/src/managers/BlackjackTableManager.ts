@@ -629,8 +629,20 @@ export class BlackjackTableManager {
       console.log(`[BlackjackTableManager] Refunded ${player.bet} coins to ${userId} on table leave`);
     }
 
-    // Remove player
+    // Track whether it was the leaver's turn before indices shift below
+    const wasCurrentPlayer = table.gamePhase === 'playing' && table.currentPlayerIndex === playerIndex;
+
+    // Remove player. If they sat at or before the current turn position, shift
+    // the index down so the turn pointer keeps referencing the same seat -
+    // otherwise the splice makes it silently skip the next player.
+    // (For the leaver themselves this parks the index one before their old
+    // seat, which is exactly where advanceToNextPlayer resumes scanning from.)
     table.players.splice(playerIndex, 1);
+    if (table.gamePhase === 'playing' && playerIndex <= table.currentPlayerIndex) {
+      // May legitimately go to -1 when seat 0 leaves during their own turn:
+      // advanceToNextPlayer scans from currentPlayerIndex + 1 = 0.
+      table.currentPlayerIndex = table.currentPlayerIndex - 1;
+    }
     table.lastActivity = new Date();
     await table.save();
 
@@ -651,7 +663,7 @@ export class BlackjackTableManager {
     }
 
     // If current player left during their turn, advance
-    if (table.gamePhase === 'playing' && table.currentPlayerIndex === playerIndex) {
+    if (wasCurrentPlayer) {
       this.advanceToNextPlayer(tableId, guildId, io);
     }
 

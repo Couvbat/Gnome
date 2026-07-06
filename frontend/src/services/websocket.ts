@@ -61,7 +61,10 @@ class WebSocketService {
     }
     this.listeners.get(event)?.push(callback);
 
-    if (this.socket?.connected) {
+    // Attach even while the socket is still handshaking (connected === false):
+    // socket.io queues handlers, so gating on `connected` here silently dropped
+    // every listener registered between connect() and the 'connect' event.
+    if (this.socket) {
       this.socket.on(event, callback as any);
     }
   }

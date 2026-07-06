@@ -433,13 +433,26 @@ export const command: Command = {
     
     collector.on('end', async () => {
       try {
+        // The bet was charged up front - if the player walks away mid-hand,
+        // settle it as an auto-stand instead of silently swallowing the coins.
+        if (!gameState.gameOver) {
+          gameState.gameOver = true;
+          dealerPlay(gameState);
+          gameState.result = await determineWinner(gameState);
+          await interaction.editReply({
+            embeds: [createGameEmbed(gameState, true)],
+            components: [createButtons(true)]
+          });
+          return;
+        }
+
         // Disable all buttons when collector expires
         await interaction.editReply({
           components: [createButtons(true)]
         });
       } catch (error) {
         // Message might have been deleted
-        console.log('Could not disable buttons:', error);
+        console.log('Could not settle expired game / disable buttons:', error);
       }
     });
   },

@@ -64,7 +64,7 @@ describe('DiceEngine', () => {
       );
     });
 
-    it('high prediction wins when total is 7 or above (2x payout)', async () => {
+    it('high prediction wins when total is 8 or above (2x payout)', async () => {
       mockDiceRoll(6, 6); // total = 12
       const result = await DiceEngine.rollDice('user1', 'guild1', 100, 'high');
       expect(result.isCorrect).toBe(true);
@@ -78,6 +78,18 @@ describe('DiceEngine', () => {
       const result = await DiceEngine.rollDice('user1', 'guild1', 100, 'high');
       expect(result.isCorrect).toBe(false);
       expect(result.outcome).toBe('loss');
+    });
+
+    it('a total of 7 loses both high and low bets (house edge)', async () => {
+      mockDiceRoll(3, 4); // total = 7
+      const highResult = await DiceEngine.rollDice('user1', 'guild1', 100, 'high');
+      expect(highResult.isCorrect).toBe(false);
+      expect(highResult.finalPayout).toBe(0);
+
+      mockDiceRoll(3, 4); // total = 7
+      const lowResult = await DiceEngine.rollDice('user1', 'guild1', 100, 'low');
+      expect(lowResult.isCorrect).toBe(false);
+      expect(lowResult.finalPayout).toBe(0);
     });
 
     it('low prediction wins when total is 6 or below (2x payout)', async () => {

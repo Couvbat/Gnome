@@ -590,9 +590,10 @@ router.get('/tables/blackjack', async (req: AuthenticatedRequest, res, next) => 
 // GET /api/casino/tables/roulette/:tableId - Get roulette table status
 router.get('/tables/roulette/:tableId', async (req: AuthenticatedRequest, res, next) => {
   try {
+    const { guildId } = req.user!;
     const { tableId } = req.params;
 
-    const status = await RouletteTableManager.getTableStatus(tableId);
+    const status = await RouletteTableManager.getTableStatus(tableId, guildId);
 
     if (!status) {
       throw new AppError('Table not found', 404);

@@ -125,8 +125,10 @@ export class SlotsEngine extends CasinoGameEngine {
       }
     }
 
-    // Calculate final payout (on a loss, payout is 0, actualBetLoss tracks how much was actually deducted)
-    const finalPayout = outcome === 'loss' ? 0 : baseWinnings;
+    // Calculate final payout. The full bet is charged by processGameResult, so on
+    // a loss the payout is the ability-protected refund (bet - actualBetLoss,
+    // 0 for a plain loss) - otherwise Rogue/Paladin loss reduction would be a no-op.
+    const finalPayout = outcome === 'loss' ? bet - actualBetLoss : baseWinnings;
     
     // Calculate XP gain
     const xpGained = this.calculateXpGain(bet, outcome, context.character?.level || 1);
