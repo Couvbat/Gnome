@@ -78,12 +78,10 @@ export const mockDiceResponse = {
 // Create mock API service
 export const createMockApiService = () => ({
   devLogin: vi.fn().mockResolvedValue({ token: 'mock-token', user: mockUser }),
-  login: vi.fn().mockResolvedValue({ token: 'mock-token', user: mockUser }),
   getCurrentUser: vi.fn().mockResolvedValue(mockUser),
   createCharacter: vi.fn().mockResolvedValue(mockCharacter),
   getMyCharacter: vi.fn().mockResolvedValue(mockCharacter),
   deleteCharacter: vi.fn().mockResolvedValue(undefined),
-  updateCharacter: vi.fn().mockResolvedValue(mockCharacter),
   getActiveTables: vi.fn().mockResolvedValue([mockGameTable]),
   createBlackjackTable: vi.fn().mockResolvedValue(mockGameTable),
   createRouletteTable: vi.fn().mockResolvedValue({ ...mockGameTable, gameType: 'roulette', maxPlayers: null }),
@@ -98,7 +96,6 @@ export const createMockApiService = () => ({
       ],
     },
   }),
-  getGameHistory: vi.fn().mockResolvedValue([]),
 });
 
 // Create mock WebSocket service

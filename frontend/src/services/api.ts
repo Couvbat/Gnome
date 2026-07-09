@@ -105,14 +105,6 @@ class ApiService {
     await this.client.delete('/characters/me');
   }
 
-  async updateCharacter(
-    userId: string,
-    updates: Partial<Character>
-  ): Promise<Character> {
-    const response = await this.client.patch(`/characters/${userId}`, updates);
-    return response.data;
-  }
-
   // Casino endpoints - multiplayer tables (see backend/src/routes/casino.ts
   // "MULTIPLAYER TABLES" section). Joining/leaving and gameplay actions
   // (bet/hit/stand/spin) happen over WebSocket - see services/websocket.ts.
@@ -159,14 +151,6 @@ class ApiService {
       maxBet: response.data.maxBet,
       gamePhase: 'waiting'
     };
-  }
-
-  // Game endpoints (Single-player RPG games)
-  async getGameHistory(userId: string, limit = 10): Promise<any[]> {
-    const response = await this.client.get(`/games/history/${userId}`, {
-      params: { limit },
-    });
-    return response.data;
   }
 
   // Single-player game endpoints (no tables, immediate play with RPG bonuses)
