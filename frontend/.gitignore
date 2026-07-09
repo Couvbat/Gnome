@@ -27,3 +27,6 @@ dist-ssr
 .env
 .env.local
 .env.production
+
+# Local HTTPS certs (mkcert) - never commit private keys
+certs/

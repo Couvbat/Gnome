@@ -53,12 +53,9 @@ class ApiService {
     );
   }
 
-  // Auth endpoints
-  async login(discordToken: string): Promise<{ token: string; user: User }> {
-    const response = await this.client.post('/auth/login', { discordToken });
-    return response.data;
-  }
-
+  // Auth endpoints - the real login path is the Discord SDK flow in
+  // discordSdk.ts (POST /api/auth/discord); devLogin is the browser-only
+  // fallback and 403s in production.
   async devLogin(username = 'Demo User'): Promise<{ token: string; user: User }> {
     const response = await this.client.post('/auth/dev', { username });
     if (response.data.token) {
