@@ -384,8 +384,8 @@ export class RouletteEngine extends CasinoGameEngine {
   // Multiplayer table management
   static createRouletteTable(
     tableId: string,
-    minBet: number = 1,
-    maxBet: number = 1000
+    _minBet: number = 1,
+    _maxBet: number = 1000
   ): RouletteTable {
     return {
       id: tableId,
@@ -422,7 +422,7 @@ export class RouletteEngine extends CasinoGameEngine {
   static async executeMultiplayerSpin(
     tableId: string,
     guildId: string,
-    io?: any
+    _io?: any
   ): Promise<{
     winningNumber: number;
     winningColor: 'red' | 'black' | 'green';

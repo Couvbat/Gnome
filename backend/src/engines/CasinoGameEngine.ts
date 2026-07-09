@@ -327,7 +327,7 @@ export class CasinoGameEngine {
     return potentialLoss;
   }
 
-  static async triggerBardLuckySong(context: any, guildId: string, tableId?: string): Promise<number> {
+  static async triggerBardLuckySong(context: any, guildId: string, _tableId?: string): Promise<number> {
     if (context.characterBonus.className !== 'bard') return 1.0;
     
     // Check if ability can be used

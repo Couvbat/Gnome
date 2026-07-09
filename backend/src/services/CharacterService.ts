@@ -1,4 +1,3 @@
-import { Types } from 'mongoose';
 import { User, Character, CasinoProfile } from '../models/database';
 import { AppError } from '../middleware/errorHandler';
 

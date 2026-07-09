@@ -232,10 +232,11 @@ export class DiceEngine extends CasinoGameEngine {
       case 'exact':
         return total === prediction.value;
       
-      case 'range':
+      case 'range': {
         const [min, max] = prediction.value as [number, number];
         return total >= min && total <= max;
-      
+      }
+
       default:
         return false;
     }

@@ -252,7 +252,7 @@ router.get('/stats/user', async (req: AuthenticatedRequest, res, next) => {
   try {
     const { userId, guildId } = req.user!;
 
-    const { CasinoGameLog } = require('../models/schemas');
+    const { CasinoGameLog } = await import('../models/schemas');
 
     const stats = await CasinoGameLog.aggregate([
       { $match: { userId, guildId } },
@@ -280,8 +280,7 @@ router.get('/leaderboard', async (req: AuthenticatedRequest, res, next) => {
     const { guildId } = req.user!;
     const { period = 'all' } = req.query; // 'daily', 'weekly', 'monthly', 'all'
 
-    const { User } = require('../models/database');
-    const { SharedEconomy } = require('../models/database');
+    const { User, SharedEconomy } = await import('../models/database');
 
     let dateFilter: any = {};
     if (period === 'daily') {

@@ -205,7 +205,6 @@ describe('Discord User Avatar URL Generation', () => {
   });
 
   it('should handle users without avatar', () => {
-    const userId = '123456789';
     const avatar = null;
     
     // When avatar is null, we typically use a default or emoji
