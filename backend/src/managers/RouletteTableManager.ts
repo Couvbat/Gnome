@@ -1,6 +1,5 @@
 import { RouletteTable } from '../models/schemas';
 import { RouletteEngine } from '../engines/RouletteEngine';
-import { BardAbilities } from '../services/BardAbilities';
 import type { Server as SocketIOServer } from 'socket.io';
 import { EconomyService } from '../services/EconomyService';
 
@@ -152,7 +151,7 @@ export class RouletteTableManager {
       }
 
       // Find existing player bet or create new
-      let playerBet = tableDoc.bets.find((b: any) => b.userId === userId);
+      const playerBet = tableDoc.bets.find((b: any) => b.userId === userId);
 
       // Charge the bet atomically now (rejecting if the player can't afford it), same
       // pattern as BlackjackTableManager.placeBet - previously this table only moved

@@ -115,7 +115,7 @@ export class BlackjackEngine extends CasinoGameEngine {
     // Check for immediate blackjack
     if (playerHand.isBlackjack) {
       const dealerBlackjack = dealerHand.isBlackjack;
-      let outcome: 'win' | 'push' | 'jackpot' = dealerBlackjack ? 'push' : 'jackpot';
+      const outcome: 'win' | 'push' | 'jackpot' = dealerBlackjack ? 'push' : 'jackpot';
       let payout = dealerBlackjack ? bet : bet * 2.5; // Blackjack pays 3:2
       
       // Merchant bonus for blackjack
@@ -434,7 +434,7 @@ export class BlackjackEngine extends CasinoGameEngine {
     strategy: 'hit' | 'stand' | 'double',
     hand: BlackjackHand,
     deck: Card[],
-    bet: number
+    _bet: number
   ): Promise<BlackjackHand> {
     if (strategy === 'stand') {
       return hand;
@@ -690,7 +690,7 @@ export class BlackjackEngine extends CasinoGameEngine {
       characterBonus?: string;
     }>;
   }> {
-    const { BlackjackTable, CasinoSession, CasinoGameLog } = await import('../models/schemas');
+    const { BlackjackTable, CasinoGameLog } = await import('../models/schemas');
     const BardAbilities = await import('../services/BardAbilities');
 
     const table = await BlackjackTable.findOne({ tableId, guildId }).exec();

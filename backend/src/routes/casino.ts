@@ -364,7 +364,7 @@ router.get('/games/status', async (req: AuthenticatedRequest, res, next) => {
     const { guildId } = req.user!;
 
     // Import game models
-    const { BlackjackTable, RouletteTable, SlotMachine } = require('../models/schemas');
+    const { BlackjackTable, RouletteTable, SlotMachine } = await import('../models/schemas');
 
     const [blackjackTables, rouletteTables, slotMachines] = await Promise.all([
       BlackjackTable.find({ guildId, isActive: true }),

@@ -135,6 +135,20 @@ const startServer = async () => {
   });
 };
 
+// Crash visibility: Node 22 kills the process on an unhandled rejection with
+// no useful log line; log it and keep serving (mirrors bot/index.ts). For
+// uncaught exceptions the process state is unknown - log, then exit so
+// Passenger restarts a clean instance.
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[CRITICAL] Unhandled promise rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[CRITICAL] Uncaught exception:', error);
+  httpServer.close(() => process.exit(1));
+  setTimeout(() => process.exit(1), 5000).unref();
+});
+
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');

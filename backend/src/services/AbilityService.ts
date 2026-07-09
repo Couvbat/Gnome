@@ -1,6 +1,5 @@
 import { Character, CasinoProfile } from '../models/database';
 import { CasinoSession } from '../models/schemas';
-import { Types } from 'mongoose';
 
 export interface AbilityUsage {
   abilityName: string;
@@ -262,8 +261,8 @@ export class AbilityService {
    */
   static getClassAbilities(characterClass: string): AbilityUsage[] {
     return Object.entries(this.ABILITY_CONFIG)
-      .filter(([key, config]) => config.characterClass === characterClass)
-      .map(([key, config]) => config);
+      .filter(([, config]) => config.characterClass === characterClass)
+      .map(([, config]) => config);
   }
 
   /**

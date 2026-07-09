@@ -189,7 +189,7 @@ export class ReputationService {
     userId: string,
     guildId: string,
     amount: number,
-    reason: string
+    _reason: string
   ): Promise<{ newTotal: number; tierChanged: boolean }> {
     const casinoProfile = await CasinoProfile.findOne({ userId, guildId });
     if (!casinoProfile) {

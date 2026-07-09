@@ -4,7 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import { CharacterService, CHARACTER_CLASSES } from '../services/CharacterService';
 import { EnergyService } from '../services/EnergyService';
 import { EconomyService } from '../services/EconomyService';
-import { User, CasinoProfile, Character } from '../models/database';
+import { User, Character } from '../models/database';
 
 // Historical starting balance for brand-new casino players, on top of the shared
 // economy's own default of 100 coins (bot/database/db.ts's UserLevel default).
@@ -19,8 +19,6 @@ const router = Router();
 // GET /api/characters/classes - Get all available character classes
 router.get('/classes', async (req: AuthenticatedRequest, res, next) => {
   try {
-    const classes = await CharacterService.getAllClasses();
-
     res.json({
       success: true,
       classes: Object.keys(CHARACTER_CLASSES).map(key => ({
@@ -284,7 +282,7 @@ router.get('/search', async (req: AuthenticatedRequest, res, next) => {
       throw new AppError('Search requires name or className parameter', 400);
     }
 
-    let query: any = { guildId };
+    const query: any = { guildId };
 
     if (name) {
       // Escape regex metacharacters so user input can't build an expensive/malicious

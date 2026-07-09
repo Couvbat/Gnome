@@ -35,8 +35,7 @@
     "mongoose": "^8.0.3",
     "morgan": "^1.10.0",
     "rate-limiter-flexible": "^4.0.1",
-    "socket.io": "^4.7.4",
-    "winston": "^3.11.0"
+    "socket.io": "^4.7.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
@@ -49,8 +48,8 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^20.19.25",
     "@types/supertest": "^6.0.0",
-    "@typescript-eslint/eslint-plugin": "^6.13.1",
-    "@typescript-eslint/parser": "^6.13.1",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.55.0",
     "socket.io-client": "^4.8.3",
     "supertest": "^6.3.3",

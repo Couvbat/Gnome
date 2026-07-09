@@ -127,7 +127,7 @@ frontend/
 
 ### Services
 
-- **`api.ts`** — Axios client (base URL `/api`) with a bearer-token interceptor. Exposes `login`, `devLogin`, `getCurrentUser`, character CRUD, table creation, `spinSlots`, `rollDice`, `getEnergy`, and game history.
+- **`api.ts`** — Axios client (base URL `/api`) with a bearer-token interceptor. Exposes `devLogin`, `getCurrentUser`, character CRUD, table creation, `spinSlots`, `rollDice`, `getEnergy`, and game history.
 - **`websocket.ts`** — Socket.io-client wrapper exposing `connect`/`disconnect`/`on`/`off`/`emit` plus typed helpers for joining tables, betting, hitting/standing, and triggering the Bard's Lucky Song ability.
 - **`discordSdk.ts`** — wraps `@discord/embedded-app-sdk`: initialization, current user/channel/guild, voice participants, activity state. Falls back to a mock SDK when not running inside Discord, for local development.
 

@@ -1,6 +1,5 @@
 import { Quest, UserQuest } from '../models/schemas';
 import { Character, type IQuestObjective, type IQuestProgressItem } from '../models/database';
-import { Types } from 'mongoose';
 import { AppError } from '../middleware/errorHandler';
 import { CharacterService } from './CharacterService';
 import { EconomyService } from './EconomyService';
