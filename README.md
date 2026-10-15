@@ -40,7 +40,7 @@ Each package is set up independently. See the package READMEs for full instructi
 - [Backend setup](backend/README.md#getting-started)
 - [Frontend setup](frontend/README.md#getting-started)
 
-Production hosting is split: the bot runs self-hosted in a TrueNAS LXC container ([bot/README.md#deployment](bot/README.md#deployment)); the backend and frontend deploy to o2switch cPanel hosting ([backend/README.md#deployment](backend/README.md#deployment), [frontend/README.md#deployment](frontend/README.md#deployment)). MongoDB is self-hosted alongside the bot and shared by both.
+Production hosting is split: the bot runs self-hosted in a TrueNAS LXC container ([bot/README.md#deployment](bot/README.md#deployment)); the backend and frontend deploy to o2switch cPanel hosting ([backend/README.md#deployment](backend/README.md#deployment), [frontend/README.md#deployment](frontend/README.md#deployment)). MongoDB is self-hosted alongside the bot and shared by both. Deploys are automated from `main`: GitHub Actions ships the backend and frontend to o2switch, and the bot's container polls GitHub and redeploys itself once the bot's CI run is green.
 
 ### Prerequisites
 
