@@ -1,0 +1,16 @@
+[Unit]
+Description=Deploy the Gnome Discord bot from GitHub main
+Documentation=https://github.com/Couvbat/Gnome/blob/main/bot/README.md#automated-deployment
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Must own /opt/gnome and the pm2 process list (bot/README.md sets both up as root).
+User=root
+EnvironmentFile=-/etc/default/gnome-bot-deploy
+StateDirectory=gnome-bot-deploy
+ExecStart=/usr/bin/env bash /opt/gnome/bot/deploy/gnome-bot-deploy.sh
+# npm ci plus a TypeScript build can take a few minutes inside the container.
+TimeoutStartSec=15min
+Nice=10

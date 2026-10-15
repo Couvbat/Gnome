@@ -1,0 +1,51 @@
+# The bot is not deployed from here: GitHub cannot reach the TrueNAS container.
+# Instead the container polls main (bot/deploy/gnome-bot-deploy.sh) and only
+# deploys a commit once the latest push run of this workflow on main has
+# succeeded, so a red run here holds the bot at its current version.
+# Renaming this file means updating CI_WORKFLOW in that script.
+name: Build Bot
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bot/**'
+      - '.github/workflows/bot-*.yml'
+  pull_request:
+    paths:
+      - 'bot/**'
+      - '.github/workflows/bot-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: bot
+
+jobs:
+  build_bot:
+    name: Build Bot
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Matches the container, which installs Node.js from NodeSource's 22.x line.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Discord, Mistral, Riot, OpenAI and Mongoose are all mocked: no secrets needed.
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
