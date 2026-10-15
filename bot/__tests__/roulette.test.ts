@@ -213,4 +213,93 @@ describe('Roulette Command', () => {
       })
     );
   });
+
+  test('should not refund or show timeout once a bet has been played', async () => {
+    await command.execute(mockInteraction);
+
+    await mockCollector._collect({
+      user: { id: 'test-user-id' },
+      customId: 'bet_red',
+      component: { label: 'Rouge' },
+      update: vi.fn().mockResolvedValue(undefined),
+      reply: vi.fn().mockResolvedValue(undefined),
+    });
+    const coinCallsAfterRound = userLevelsDb.addCoins.mock.calls.length;
+
+    // The 60s collector timer still elapses after the round was settled
+    await mockCollector._end(new Map(), 'time');
+
+    expect(userLevelsDb.addCoins).toHaveBeenCalledTimes(coinCallsAfterRound);
+    expect(mockInteraction.editReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Temps écoulé') })
+    );
+  });
+
+  describe('number bet modal', () => {
+    function createNumberButton(modalSubmitPromise: Promise<unknown>) {
+      return {
+        user: { id: 'test-user-id' },
+        customId: 'bet_number',
+        showModal: vi.fn().mockResolvedValue(undefined),
+        awaitModalSubmit: vi.fn().mockReturnValue(modalSubmitPromise),
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    function createModalSubmit(value: string) {
+      return {
+        fields: { getTextInputValue: vi.fn().mockReturnValue(value) },
+        deferUpdate: vi.fn().mockResolvedValue(undefined),
+        reply: vi.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    test('should not play a number submitted after the game timed out and was refunded', async () => {
+      await command.execute(mockInteraction);
+
+      let submitModal: (value: unknown) => void = () => {};
+      const button = createNumberButton(new Promise(resolve => { submitModal = resolve; }));
+      const pending = mockCollector._collect(button);
+
+      // Collector times out while the modal is still open → bet refunded
+      mockCollector.ended = true;
+      await mockCollector._end(new Map(), 'time');
+      expect(userLevelsDb.addCoins).toHaveBeenCalledTimes(1);
+      expect(userLevelsDb.addCoins).toHaveBeenCalledWith('test-user-id', 'test-guild-id', 50);
+
+      // User submits the modal afterwards
+      const modalSubmit = createModalSubmit('17');
+      submitModal(modalSubmit);
+      await pending;
+
+      // The refunded bet must not also be played
+      expect(userLevelsDb.addCoins).toHaveBeenCalledTimes(1);
+      expect(userLevelsDb.addXp).not.toHaveBeenCalled();
+      expect(mockInteraction.editReply).not.toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('La roulette tourne') })
+      );
+      expect(modalSubmit.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('Temps écoulé'), ephemeral: true })
+      );
+    });
+
+    test('should only accept its own modal submitted by the player', async () => {
+      mockInteraction.id = 'game-interaction-id';
+      await command.execute(mockInteraction);
+
+      const button = createNumberButton(new Promise(() => {}));
+      void mockCollector._collect(button);
+      await Promise.resolve();
+
+      const modal = button.showModal.mock.calls[0][0];
+      const modalId = modal.data.custom_id;
+      const { filter } = button.awaitModalSubmit.mock.calls[0][0];
+
+      expect(filter).toEqual(expect.any(Function));
+      expect(filter({ customId: modalId, user: { id: 'test-user-id' } })).toBe(true);
+      // Another player's modal, or this player's modal from a different game
+      expect(filter({ customId: modalId, user: { id: 'other-user-id' } })).toBe(false);
+      expect(filter({ customId: 'roulette_number_modal_other-game', user: { id: 'test-user-id' } })).toBe(false);
+    });
+  });
 });
