@@ -300,7 +300,7 @@ Add them under Settings → Secrets and variables → Actions of `Couvbat/Gnome`
 | Variable | Used by | Value |
 |---|---|---|
 | `VITE_DISCORD_CLIENT_ID` | frontend | the Discord application ID (required, baked into the bundle) |
-| `VITE_WS_URL` | frontend | optional backend origin for Socket.io; leave unset to go through the Discord proxy |
+| `VITE_WS_URL` | frontend | leave unset: the socket then goes through the Discord proxy's `/socket` mapping, the only route Discord allows |
 
 The runtime configuration (`MONGODB_URI`, `JWT_SECRET`, ...) stays in the cPanel app's environment variables — GitHub never sees it.
 

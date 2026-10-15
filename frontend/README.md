@@ -38,8 +38,9 @@ Create `.env` in `frontend/`:
 
 ```env
 VITE_DISCORD_CLIENT_ID=discord_client_id
-# Optional backend origin for the WebSocket; defaults to the page origin
-# (the Vite dev server proxies /api and /socket.io to localhost:3001)
+# Optional backend origin for the WebSocket, reached directly on /socket.io.
+# Defaults to the page origin on /socket (the Vite dev server proxies /api to
+# localhost:3001, and /socket to its /socket.io)
 # VITE_WS_URL=http://localhost:3001
 ```
 
@@ -120,7 +121,7 @@ frontend/
 │   ├── assets/kenney_playing-cards-pack/   # card artwork
 │   └── __tests__/               # api, cardUtils, discordSdk, websocket tests
 ├── certs/                       # local HTTPS certs (gitignored)
-├── vite.config.ts               # HTTPS, /api and /socket.io proxy to :3001, Discord CSP headers
+├── vite.config.ts               # HTTPS, /api and /socket (→ /socket.io) proxy to :3001, Discord CSP headers
 ├── vitest.config.ts
 └── tailwind.config.js
 ```
@@ -166,7 +167,7 @@ Vite bakes `VITE_*` variables into the bundle at build time, so they come from *
 | Variable | |
 |---|---|
 | `VITE_DISCORD_CLIENT_ID` | required — the production Discord application ID. The deploy fails early if it's missing, rather than shipping a bundle that can't authenticate. |
-| `VITE_WS_URL` | optional — explicit backend origin for the WebSocket. When unset, the socket targets the page origin, which resolves through the Discord proxy's `/socket.io` URL mapping (see below). |
+| `VITE_WS_URL` | leave unset in production. When unset, the socket targets the page origin on `/socket`, which resolves through the Discord proxy's `/socket` URL mapping (see below) — inside Discord the Activity can only reach its own proxy origin, so a direct backend URL would be blocked. Setting it connects straight to that origin's `/socket.io`, which is only useful outside Discord (e.g. `http://localhost:3001` in development). |
 
 Secrets needed: `CPANEL_USERNAME`, `CPANEL_SERVER`, `CPANEL_API_TOKEN`, `SSH_KEY` and `FRONTEND_REMOTE_PATH` (the subdomain's document root, e.g. `/home/<user>/casino.example.com`).
 
@@ -196,7 +197,7 @@ In your application's **Activities → URL Mappings**, map the proxy paths to yo
 |---|---|
 | `/` | `casino.example.com` |
 | `/api` | `api.example.com/api` |
-| `/socket.io` | `api.example.com/socket.io` |
+| `/socket` | `api.gnome.jhemery.xyz/socket.io` |
 
 The REST client uses relative `/api` URLs and the socket defaults to the page origin, so inside the Activity both resolve through these mappings. Then set the Activity URL mapping as the production entry point (replacing the `https://localhost:3000/` override used in development).
 
