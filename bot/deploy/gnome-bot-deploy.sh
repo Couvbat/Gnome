@@ -8,11 +8,13 @@
 #   2. Otherwise ask the GitHub API for the latest push run of the bot's CI
 #      workflow on main. Wait while it runs; hold the current version if it failed.
 #   3. Fast-forward to the commit that run tested, `npm ci` only if the lockfile
-#      changed, build, re-register slash commands only if they changed, restart
-#      the pm2 process and wait for /health to report the bot connected.
+#      changed, build into a fresh dist/, re-register slash commands only if they
+#      changed, restart the pm2 process and wait for /health to report the bot
+#      connected.
 #
-# The first run has no record of what is running, so it does a full deploy:
-# npm ci, build, slash commands and restart.
+# When what is installed is unknown -- on the first run, or after a failed
+# deploy that may have got halfway -- the next deploy is a full one: npm ci,
+# build, slash commands and restart.
 #
 # Usage: gnome-bot-deploy.sh [--dry-run] [--force]
 #   --dry-run  report what would be deployed without touching anything
@@ -27,7 +29,8 @@ BRANCH="${BRANCH:-main}"
 PM2_APP="${PM2_APP:-gnome-bot}"
 GITHUB_REPO="${GITHUB_REPO:-Couvbat/Gnome}"
 CI_WORKFLOW="${CI_WORKFLOW:-bot-build.yml}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/health}"
+# Set it to an empty value to skip the health check.
+HEALTH_URL="${HEALTH_URL-http://127.0.0.1:3000/health}"
 STATE_DIR="${STATE_DIR:-/var/lib/gnome-bot-deploy}"
 # Optional. The public repo needs no token, but unauthenticated API calls share
 # a 60/hour limit per public IP; a read-only token raises it.
@@ -36,7 +39,7 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 # What the running bot is built from. Tests, docs and this deploy tooling are
 # left out so that changing them does not restart the bot.
 BOT_PATHS=(bot ':(exclude)bot/deploy' ':(exclude)bot/__tests__' ':(exclude)bot/README.md')
-# What `npm run deploy` registers with Discord.
+# What deploy-commands.js registers with Discord.
 COMMAND_PATHS=(bot/commands bot/deploy-commands.ts)
 
 DRY_RUN=0
@@ -73,10 +76,10 @@ wait_for_health() {
   return 1
 }
 
-# $1 is the commit the running bot was built from, empty when unknown (first
-# run), in which case everything is reinstalled and re-registered.
+# $1 is the commit the running bot was built from, empty when unknown, in
+# which case everything is reinstalled and re-registered.
 deploy() {
-  local from="$1" to="$2" install=yes commands=yes running="unknown (first run)"
+  local from="$1" to="$2" install=yes commands=yes running="unknown"
 
   if [ -n "$from" ]; then
     running=$(short "$from")
@@ -100,11 +103,16 @@ deploy() {
   (
     cd bot
     [ "$install" = no ] || npm ci --no-audit --no-fund
-    if [ "$commands" = yes ]; then
-      npm run deploy   # builds, then registers the slash commands
-    else
-      npm run build
-    fi
+    # `tsc` never deletes output, so building over dist/ would keep the .js of a
+    # deleted or renamed command, which index.ts and deploy-commands.js both
+    # load by listing dist/commands. Build into a fresh directory instead: the
+    # running bot's dist/ stays untouched until the swap, including when the
+    # build or the command registration fails.
+    rm -rf dist.next
+    npm run build -- --outDir dist.next
+    [ "$commands" = no ] || node dist.next/deploy-commands.js
+    rm -rf dist
+    mv dist.next dist
   )
 
   pm2 restart "$PM2_APP"
@@ -144,7 +152,15 @@ main() {
   # Empty on the first run: a checkout that was pulled but never rebuilt looks
   # exactly like a deployed one, so nothing is assumed and the first run does
   # a full deploy.
+  local failed
   deployed=$(cat "$STATE_DIR/deployed" 2>/dev/null || true)
+  failed=$(cat "$STATE_DIR/failed" 2>/dev/null || true)
+  # A failed attempt may already have replaced dependencies, registered
+  # commands or restarted the bot, so `deployed` no longer describes what is
+  # installed. Forgetting it skips both "no changes" shortcuts (a revert to the
+  # deployed sources would otherwise be recorded without a rebuild) and makes
+  # the next deploy a full one.
+  [ -z "$failed" ] || deployed=""
 
   if [ -n "$deployed" ] && git diff --quiet "$deployed" "$remote" -- "${BOT_PATHS[@]}"; then
     if [ "$head" = "$remote" ] && [ "$deployed" = "$remote" ]; then
@@ -199,7 +215,7 @@ main() {
       exit 1
     fi
   fi
-  if [ "$FORCE" = 0 ] && [ "$(cat "$STATE_DIR/failed" 2>/dev/null)" = "$target" ]; then
+  if [ "$FORCE" = 0 ] && [ "$failed" = "$target" ]; then
     log "$(short "$target") already failed to deploy; push a fix or rerun with --force"
     exit 0
   fi

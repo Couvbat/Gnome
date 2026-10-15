@@ -279,11 +279,11 @@ GitHub can't reach the NAS, so the container polls GitHub instead: a systemd tim
 
 1. It fetches `main`. If nothing the bot runs on changed since the last deployed commit (changes under `bot/` other than `__tests__/`, `deploy/` and this README), it only fast-forwards `/opt/gnome` and stops.
 2. Otherwise it asks the GitHub API for the latest push run of the **Build Bot** workflow ([`.github/workflows/bot-build.yml`](../.github/workflows/bot-build.yml): `npm test` + `npm run build`) on `main`. It waits while the run is in progress and keeps the current version if the run failed.
-3. Once the run is green, it fast-forwards to the commit that run tested, runs `npm ci` only if `package-lock.json` changed, runs `npm run deploy` (build + slash command registration) only if `commands/` or `deploy-commands.ts` changed and `npm run build` otherwise, then `pm2 restart gnome-bot`, and waits up to a minute for `GET /health` to report `"bot":"connected"`.
+3. Once the run is green, it fast-forwards to the commit that run tested and runs `npm ci` only if `package-lock.json` changed. It builds into a fresh `dist.next/`, so a deleted or renamed command can't linger in the output (`tsc` never deletes files). It registers the slash commands from that build (`deploy-commands.js`) only if `commands/` or `deploy-commands.ts` changed. Then it swaps `dist.next/` in for `dist/`, runs `pm2 restart gnome-bot`, and waits up to a minute for `GET /health` to report `"bot":"connected"`. A failed build or registration stops before the swap, leaving the running bot's `dist/` untouched.
 
-A commit that fails to deploy (build error, bot never connects) is recorded and not retried; the next pushed commit is tried normally, or rerun it with `--force`. There is no automatic rollback: the bot stays on whatever was last restarted.
+A commit that fails to deploy (build error, rejected command registration, bot never connects) is recorded and not retried; the next pushed commit is tried, or rerun it with `--force`. There is no automatic rollback: the bot stays on whatever was last restarted.
 
-The first run has no record of what is running, so it always does a full deploy (`npm ci`, build, slash commands, restart). That way a checkout that was pulled but never rebuilt can't pass for a deployed one.
+Whenever what is installed is unknown, the next deploy is a full one (`npm ci`, build, slash commands, restart). That covers the first run — a checkout that was pulled but never rebuilt can't pass for a deployed one — and any run after a failed deploy, which may have got halfway.
 
 #### Setup
 
@@ -320,7 +320,7 @@ bash /opt/gnome/bot/deploy/gnome-bot-deploy.sh --force   # retry a commit that f
 systemctl disable --now gnome-bot-deploy.timer   # pause automatic deploys
 ```
 
-State lives in `/var/lib/gnome-bot-deploy/`: `deployed` holds the running commit, `failed` the last commit that failed. Deleting `deployed` makes the next run a full deploy again. When the `.service` or `.timer` files change in the repo, copy them again and run `systemctl daemon-reload`; the script itself is picked up automatically.
+State lives in `/var/lib/gnome-bot-deploy/`: `deployed` holds the last successfully deployed commit, `failed` the last commit that failed (cleared by the next successful deploy). Deleting `deployed` makes the next run a full deploy again. When the `.service` or `.timer` files change in the repo, copy them again and run `systemctl daemon-reload`; the script itself is picked up automatically.
 
 ### Updating by hand
 
