@@ -17,12 +17,16 @@ permissions:
   contents: read
 
 # Shared with the frontend deploy: two runs at once means two entries in the
-# 5-slot SSH whitelist and two IPs racing the firewall. Concurrency groups are
-# per repository, so this does not serialize against the portfolio's deploys
-# on the same cPanel account.
+# 5-slot SSH whitelist and two IPs racing the firewall. `queue: max` keeps
+# every pending run: by default a group holds a single pending run and a newer
+# one replaces it, so a backend push could silently drop a queued frontend
+# deploy that no later push would retrigger (the workflows are path-filtered).
+# Concurrency groups are per repository, so this does not serialize against
+# the portfolio's deploys on the same cPanel account.
 concurrency:
   group: o2switch-deploy
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build:

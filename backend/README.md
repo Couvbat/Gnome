@@ -279,7 +279,7 @@ The backend and the [frontend](../frontend/README.md#deployment) deploy with the
 
 The deploy job adds the runner's IP to the cPanel SSH whitelist through the cPanel API, waits for the firewall to accept it, rsyncs the build into `BACKEND_REMOTE_PATH/dist/` (`--delete` stays scoped to `dist/`, so `.htaccess`, `tmp/`, `public/` and the `node_modules` symlink are never touched), then over SSH enters the app's virtualenv, copies `package.json`/`package-lock.json` to the application root, runs `npm ci --omit=dev` and touches `tmp/restart.txt` so Passenger restarts the app. The IP is removed from the whitelist (both directions) even if a step failed. A failing lint, test or build stops the run before anything is uploaded.
 
-Both deploy workflows share the `o2switch-deploy` concurrency group, so a backend and a frontend deploy never run at once. Groups are per repository, though: a portfolio deploy on the same cPanel account can still overlap, each taking one of the whitelist's five slots while it runs.
+Both deploy workflows share the `o2switch-deploy` concurrency group (with `queue: max`), so a backend and a frontend deploy never run at once, and pending deploys wait their turn instead of replacing each other. Groups are per repository, though: a portfolio deploy on the same cPanel account can still overlap, each taking one of the whitelist's five slots while it runs.
 
 **Merging a change to `main` deploys it.** That includes the commit that adds these workflows (it touches `.github/workflows/backend-*.yml`), so set the secrets first or expect a red run.
 

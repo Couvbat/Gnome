@@ -16,12 +16,16 @@ permissions:
   contents: read
 
 # Shared with the backend deploy: two runs at once means two entries in the
-# 5-slot SSH whitelist and two IPs racing the firewall. Concurrency groups are
-# per repository, so this does not serialize against the portfolio's deploys
-# on the same cPanel account.
+# 5-slot SSH whitelist and two IPs racing the firewall. `queue: max` keeps
+# every pending run: by default a group holds a single pending run and a newer
+# one replaces it, so a backend push could silently drop a queued frontend
+# deploy that no later push would retrigger (the workflows are path-filtered).
+# Concurrency groups are per repository, so this does not serialize against
+# the portfolio's deploys on the same cPanel account.
 concurrency:
   group: o2switch-deploy
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build:
@@ -33,9 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      # rsync below runs with `--delete` straight into FRONTEND_REMOTE_PATH. An
-      # unset secret would make the target `user@host:`, the cPanel home
-      # directory, and wipe everything else hosted on the account.
+      # Fail before whitelisting anything. FRONTEND_REMOTE_PATH itself is
+      # validated on the server, right before the rsync that uses it.
       - name: Check deploy configuration
         env:
           CPANEL_USERNAME: ${{ secrets.CPANEL_USERNAME }}
@@ -52,13 +55,6 @@ jobs:
             echo "::error title=Missing secrets::Add these under Settings -> Secrets and variables -> Actions:$missing"
             exit 1
           fi
-          path="${FRONTEND_REMOTE_PATH%/}"
-          case "$path" in
-            ""|"~"|"."|"/home/$CPANEL_USERNAME")
-              echo "::error title=Unsafe FRONTEND_REMOTE_PATH::It must be the subdomain's document root, e.g. /home/$CPANEL_USERNAME/casino.example.com, never the home directory itself."
-              exit 1
-              ;;
-          esac
 
       - name: Download Build Artifact
         uses: actions/download-artifact@v8
@@ -137,18 +133,42 @@ jobs:
           echo "::error title=SSH unreachable::The IP was whitelisted but SSH never accepted a connection."
           exit 1
 
+      # `--delete` into the account's home directory would wipe every other site
+      # hosted on it, and spellings like `/home/<user>/.`, `/home/<user>//` or a
+      # symlink all lead there. So the path is resolved on the server
+      # (`pwd -P`), must sit strictly below the resolved home, and rsync
+      # targets that resolved path rather than the raw secret. It happens in
+      # this one step because GitHub drops step outputs that contain a secret.
+      #
       # Unlike the backend, this deploys to the document root itself -- there is
       # no subdirectory to scope `--delete` to, so anything server-side that the
       # build does not produce has to be named here or it gets deleted.
       # `.well-known` is where AutoSSL puts its ACME challenges; `cgi-bin` and
       # `error_log` are cPanel's.
       - name: Sending data with RSYNC
+        env:
+          REMOTE: ${{ secrets.CPANEL_USERNAME }}@${{ secrets.CPANEL_SERVER }}
+          FRONTEND_REMOTE_PATH: ${{ secrets.FRONTEND_REMOTE_PATH }}
         run: |
+          if ! resolved=$(ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$REMOTE" \
+            "cd -- $(printf '%q' "$FRONTEND_REMOTE_PATH") && pwd -P && cd && pwd -P"); then
+            echo "::error title=FRONTEND_REMOTE_PATH not found::It must be an existing directory: the subdomain's document root."
+            exit 1
+          fi
+          target=$(sed -n 1p <<<"$resolved")
+          home=$(sed -n 2p <<<"$resolved")
+          case "$target" in
+            "$home"/?*) ;;
+            *)
+              echo "::error title=Unsafe FRONTEND_REMOTE_PATH::It resolves to the account's home directory or outside it. It must be the subdomain's document root, e.g. <home>/casino.example.com."
+              exit 1
+              ;;
+          esac
           rsync --timeout=60 -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa" \
           --exclude=".env" --exclude=".well-known" --exclude="cgi-bin" \
           --exclude=".htpasswd" --exclude="error_log" \
           -av --delete build/ \
-          "${{ secrets.CPANEL_USERNAME }}@${{ secrets.CPANEL_SERVER }}:${{ secrets.FRONTEND_REMOTE_PATH }}"
+          "$REMOTE:$target/"
 
       # Both directions. `add?direction=in` also creates the matching `out` entry,
       # so removing only `in` leaves one behind — and since the quota counts
