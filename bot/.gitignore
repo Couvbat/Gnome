@@ -3,6 +3,8 @@ node_modules
 temp/
 coverage/
 dist/
+# Staging build of bot/deploy/gnome-bot-deploy.sh
+dist.next/
 .jest-cache/
 
 # Database

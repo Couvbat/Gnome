@@ -237,27 +237,22 @@ Character data lives in `Character` (class, stats, XP) and `CasinoProfile` (ener
 
 The backend deploys to **o2switch shared hosting** via cPanel's **Setup Node.js App** (CloudLinux Node.js selector + Phusion Passenger), on its own subdomain (e.g. `api.example.com`). MongoDB stays **self-hosted at home** on the same box as the [bot](../bot/README.md#deployment) — the backend reaches it over the internet.
 
+The code itself is shipped by GitHub Actions (see [Automated deployment](#automated-deployment) below): the server only holds the compiled `dist/` and its production dependencies, not a clone of the repo.
+
 ### cPanel application setup
 
 1. In cPanel, create the subdomain (e.g. `api.example.com`) and enable AutoSSL for it (SSL/TLS Status → Run AutoSSL). HTTPS is mandatory for Discord Activities.
-2. Over SSH, clone the repo **inside the application root** — the physical folder named after the subdomain:
-   ```bash
-   git clone <repo-url> ~/api.example.com/gnome
-   ```
-3. In **Setup Node.js App** (*Créer une application*), create the application:
-   - **Node.js version** — the newest available (o2switch offers 24.x; 18 minimum)
+2. In **Setup Node.js App** (*Créer une application*), create the application:
+   - **Node.js version** — the newest available (o2switch offers 24.x, which is also what CI builds with; 18 minimum)
    - **Application mode** (*Mode d'application*) — `Production`. This is what sets `NODE_ENV` — don't add it as an env variable.
    - **Application root** (*Racine de l'application*) — the subdomain's folder: `api.example.com`
    - **Application URL** (*URL de l'application*) — the subdomain, path left empty (mounted at `/`)
-   - **Application startup file** (*Fichier de démarrage*) — `gnome/backend/dist/index.js`, relative to the application root
-4. Copy the "enter to virtual environment" command shown at the top of the app's page, run it over SSH, then install and build from the backend package:
-   ```bash
-   cd ~/api.example.com/gnome/backend
-   npm ci
-   npm run build
-   ```
-5. Add the environment variables in the app's UI (*Ajouter une variable*): `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, and `DISCORD_ACTIVITY_URL` (this is also the allowed CORS origin — set it to the Activity's proxy origin, `https://<discord-app-id>.discordsays.com`). **Do not set `PORT`** — Passenger assigns it and the server already reads `process.env.PORT`.
-6. Click **Restart** in the app UI. Verify with `curl https://api.example.com/health`.
+   - **Application startup file** (*Fichier de démarrage*) — `dist/index.js`, relative to the application root (the deploy uploads the build to `api.example.com/dist/`)
+3. Note the "enter to virtual environment" command shown at the top of the app's page, e.g. `source /home/<user>/nodevenv/api.example.com/24/bin/activate && cd /home/<user>/api.example.com`. The `.../bin/activate` path is the `BACKEND_APP_ENTRY` secret and the folder is `BACKEND_REMOTE_PATH`.
+4. Add the environment variables in the app's UI (*Ajouter une variable*): `MONGODB_URI`, `JWT_SECRET`, `DISCORD_CLIENT_ID`, and `DISCORD_ACTIVITY_URL` (this is also the allowed CORS origin — set it to the Activity's proxy origin, `https://<discord-app-id>.discordsays.com`). **Do not set `PORT`** — Passenger assigns it and the server already reads `process.env.PORT`.
+5. Run the **Deploy Backend** workflow (GitHub → Actions → Deploy Backend → Run workflow) once the secrets below are set. Verify with `curl https://api.example.com/health`.
+
+**Migrating from the old manual layout** (repo cloned at `~/api.example.com/gnome`, startup file `gnome/backend/dist/index.js`): change the startup file to `dist/index.js` and click **Save**, then run the workflow. The `gnome/` clone can be deleted once `/health` answers.
 
 ### Reaching the home MongoDB
 
@@ -272,16 +267,54 @@ The backend and the bot must share the same database, so `MONGODB_URI` points ba
 
 o2switch fronts Node apps with LiteSpeed + Passenger, which supports WebSocket upgrades. The frontend pins `transports: ['websocket']` — if the upgrade is ever refused by the proxy, remove that option in `frontend/src/services/websocket.ts` so Socket.io can fall back to HTTP long-polling.
 
-### Updating
+### Automated deployment
+
+The backend and the [frontend](../frontend/README.md#deployment) deploy with the same pipeline as the portfolio (`Couvbat/jhemery`), one workflow pair per package:
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| [`backend-build.yml`](../.github/workflows/backend-build.yml) | PRs touching `backend/**`, and called by the deploy | `npm ci`, lint, `npm test`, `npm run build` (Node 24) |
+| [`backend-deploy.yml`](../.github/workflows/backend-deploy.yml) | push to `main` touching `backend/**` or `.github/workflows/backend-*.yml`, or *Run workflow* | build → deploy below |
+| [`frontend-build.yml`](../.github/workflows/frontend-build.yml) / [`frontend-deploy.yml`](../.github/workflows/frontend-deploy.yml) | the same, for `frontend/**` | see the [frontend README](../frontend/README.md#deployment) |
+
+The deploy job adds the runner's IP to the cPanel SSH whitelist through the cPanel API, waits for the firewall to accept it, rsyncs the build into `BACKEND_REMOTE_PATH/dist/` (`--delete` stays scoped to `dist/`, so `.htaccess`, `tmp/`, `public/` and the `node_modules` symlink are never touched), then over SSH enters the app's virtualenv, copies `package.json`/`package-lock.json` to the application root, runs `npm ci --omit=dev` and touches `tmp/restart.txt` so Passenger restarts the app. The IP is removed from the whitelist (both directions) even if a step failed. A failing lint, test or build stops the run before anything is uploaded.
+
+Both deploy workflows share the `o2switch-deploy` concurrency group (with `queue: max`), so a backend and a frontend deploy never run at once, and pending deploys wait their turn instead of replacing each other. Groups are per repository, though: a portfolio deploy on the same cPanel account can still overlap, each taking one of the whitelist's five slots while it runs.
+
+**Merging a change to `main` deploys it.** That includes the commit that adds these workflows (it touches `.github/workflows/backend-*.yml`), so set the secrets first or expect a red run.
+
+#### GitHub secrets and variables
+
+Add them under Settings → Secrets and variables → Actions of `Couvbat/Gnome`. The cPanel ones are the same values as the portfolio's, but secrets are per repository, so they have to be added here too.
+
+| Secret | Used by | Value |
+|---|---|---|
+| `CPANEL_USERNAME` | both | cPanel login |
+| `CPANEL_SERVER` | both | the cPanel/SSH hostname, e.g. `<server>.o2switch.net` |
+| `CPANEL_API_TOKEN` | both | cPanel → *Gérer les jetons d'API* (Manage API Tokens) |
+| `SSH_KEY` | both | private key whose public half is authorized in cPanel → *Accès SSH* |
+| `BACKEND_REMOTE_PATH` | backend | the application root, e.g. `/home/<user>/api.example.com` (no trailing slash) |
+| `BACKEND_APP_ENTRY` | backend | the virtualenv activate script, e.g. `/home/<user>/nodevenv/api.example.com/24/bin/activate` |
+| `FRONTEND_REMOTE_PATH` | frontend | the frontend subdomain's document root, e.g. `/home/<user>/casino.example.com` |
+
+| Variable | Used by | Value |
+|---|---|---|
+| `VITE_DISCORD_CLIENT_ID` | frontend | the Discord application ID (required, baked into the bundle) |
+| `VITE_WS_URL` | frontend | optional backend origin for Socket.io; leave unset to go through the Discord proxy |
+
+The runtime configuration (`MONGODB_URI`, `JWT_SECRET`, ...) stays in the cPanel app's environment variables — GitHub never sees it.
+
+#### Updating by hand
+
+Re-run the workflow from GitHub (Actions → Deploy Backend → Run workflow). If GitHub Actions is unavailable, build locally and upload the same way:
 
 ```bash
-cd ~/api.example.com/gnome && git pull
-cd backend
-npm ci
-npm run build
+cd backend && npm ci && npm run build && cp package.json package-lock.json dist/
+rsync -av --delete dist/ <user>@<server>:api.example.com/dist/
+ssh <user>@<server> "source ~/nodevenv/api.example.com/24/bin/activate && cd ~/api.example.com && cp dist/package*.json . && npm ci --omit=dev && touch tmp/restart.txt"
 ```
 
-Then **Restart** the app from the cPanel UI (or `touch ~/api.example.com/tmp/restart.txt` — Passenger watches `tmp/restart.txt` under the application root).
+**Restart** in the cPanel UI does the same as touching `tmp/restart.txt` (Passenger watches it under the application root).
 
 ## Further reading
 

@@ -1,0 +1,78 @@
+name: Build Frontend
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-*.yml'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  build_frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # `npm run build` is a bare `vite build` with no type check of its own.
+      - name: Type check
+        run: npm run type-check
+
+      - name: Run tests
+        run: npm test
+
+      # Vite inlines VITE_* variables into the bundle at build time, so they
+      # have to be set here -- nothing on the server can supply them later.
+      # Guarded rather than defaulted: src/services/discordSdk.ts falls back to
+      # an empty client ID, which deploys fine and then fails to authenticate
+      # inside Discord. Pull requests only check that the bundle builds.
+      - name: Check the Discord client ID is configured
+        if: github.event_name != 'pull_request'
+        env:
+          VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
+        run: |
+          if [ -z "$VITE_DISCORD_CLIENT_ID" ]; then
+            echo "::error title=VITE_DISCORD_CLIENT_ID is not set::Add it under Settings -> Secrets and variables -> Actions -> Variables (the Discord application ID). Without it the Activity cannot authenticate."
+            exit 1
+          fi
+
+      - name: Build
+        env:
+          # Repository variables, not secrets: both end up in the public bundle.
+          VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
+          # Optional. Unset, the socket targets the page origin, which resolves
+          # through the Discord proxy's /socket.io URL mapping.
+          VITE_WS_URL: ${{ vars.VITE_WS_URL }}
+        run: npm run build
+
+      # upload-artifact drops dotfiles by default, so a future public/.htaccess
+      # would silently never reach the server -- and the deploy's
+      # `rsync --delete` would remove the copy already there.
+      - name: Upload Build Artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-build
+          path: frontend/dist
+          include-hidden-files: true

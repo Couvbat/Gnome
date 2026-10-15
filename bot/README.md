@@ -233,7 +233,7 @@ See [docs/TESTING.md](../docs/TESTING.md) for the full guide.
 
 ## Deployment
 
-The bot runs self-hosted in an **Ubuntu 24.04 (Noble) LXC container on TrueNAS**, managed by **pm2**, alongside a **self-hosted MongoDB** on the same network. The frontend/backend casino packages are not deployed — only the bot.
+The bot runs self-hosted in an **Ubuntu 24.04 (Noble) LXC container on TrueNAS**, managed by **pm2**, alongside a **self-hosted MongoDB** on the same network. Only the bot runs in this container; the casino [backend](../backend/README.md#deployment) and [frontend](../frontend/README.md#deployment) deploy to o2switch from GitHub Actions.
 
 ### Container provisioning
 
@@ -273,7 +273,58 @@ Notes:
 - **Timezone** — the birthday announcer cron fires at 9:00 AM *container-local* time. Set the container timezone (`timedatectl set-timezone Europe/Paris`) or export `TZ` in the pm2 environment so it doesn't fire on UTC.
 - **Health check** — the bot serves `GET /health` on `PORT` (default 3000), usable from TrueNAS or an uptime monitor to watch the process.
 
-### Updating
+### Automated deployment
+
+GitHub can't reach the NAS, so the container polls GitHub instead: a systemd timer runs [`deploy/gnome-bot-deploy.sh`](deploy/gnome-bot-deploy.sh) every 5 minutes. No inbound port and no GitHub secret is needed — the repo is public.
+
+1. It fetches `main`. If nothing the bot runs on changed since the last deployed commit (changes under `bot/` other than `__tests__/`, `deploy/` and this README), it only fast-forwards `/opt/gnome` and stops.
+2. Otherwise it asks the GitHub API for the latest push run of the **Build Bot** workflow ([`.github/workflows/bot-build.yml`](../.github/workflows/bot-build.yml): `npm test` + `npm run build`) on `main`. It waits while the run is in progress and keeps the current version if the run failed.
+3. Once the run is green, it fast-forwards to the commit that run tested and runs `npm ci` only if `package-lock.json` changed. It builds into a fresh `dist.next/`, so a deleted or renamed command can't linger in the output (`tsc` never deletes files). It registers the slash commands from that build (`deploy-commands.js`) only if `commands/` or `deploy-commands.ts` changed. Then it swaps `dist.next/` in for `dist/`, runs `pm2 restart gnome-bot`, and waits up to a minute for `GET /health` to report `"bot":"connected"`. A failed build or registration stops before the swap, leaving the running bot's `dist/` untouched.
+
+A commit that fails to deploy (build error, rejected command registration, bot never connects) is recorded and not retried; the next pushed commit is tried, or rerun it with `--force`. There is no automatic rollback: the bot stays on whatever was last restarted.
+
+Whenever what is installed is unknown, the next deploy is a full one (`npm ci`, build, slash commands, restart). That covers the first run — a checkout that was pulled but never rebuilt can't pass for a deployed one — and any run after a failed deploy, which may have got halfway.
+
+#### Setup
+
+Do this once the workflow and script are on `main`: before that the GitHub API has no Build Bot run to check, and the script exits with an error.
+
+```bash
+cd /opt/gnome && git pull                                # brings bot/deploy/ onto the box
+bash /opt/gnome/bot/deploy/gnome-bot-deploy.sh --dry-run # shows what the first run would do, changes nothing
+
+cp /opt/gnome/bot/deploy/gnome-bot-deploy.service /opt/gnome/bot/deploy/gnome-bot-deploy.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now gnome-bot-deploy.timer             # the first tick (within 5 min) does the full deploy
+```
+
+The service runs as `root`, the user that owns `/opt/gnome` and the pm2 process list in the steps above; change `User=` in the unit if yours differ. The script only needs `git`, `curl` and `node`, all already installed.
+
+Optional overrides go in `/etc/default/gnome-bot-deploy` (read by the service; `chmod 600` it if it holds a token), for example:
+
+```bash
+HEALTH_URL=http://127.0.0.1:3000/health   # match PORT in bot/.env; empty disables the check
+PM2_APP=gnome-bot
+GITHUB_TOKEN=github_pat_...               # read-only, public repos; only if the 60 req/h anonymous API limit is hit
+```
+
+The other settings (`REPO_DIR`, `BRANCH`, `GITHUB_REPO`, `CI_WORKFLOW`, `STATE_DIR`) are listed at the top of the script.
+
+#### Operating it
+
+```bash
+systemctl list-timers gnome-bot-deploy.timer     # next/last run
+journalctl -u gnome-bot-deploy -n 50             # what each run decided
+systemctl start gnome-bot-deploy.service         # run a check now instead of waiting
+bash /opt/gnome/bot/deploy/gnome-bot-deploy.sh --force   # retry a commit that failed to deploy
+systemctl disable --now gnome-bot-deploy.timer   # pause automatic deploys
+```
+
+State lives in `/var/lib/gnome-bot-deploy/`: `deployed` holds the last successfully deployed commit, `failed` the last commit that failed (cleared by the next successful deploy). Deleting `deployed` makes the next run a full deploy again. When the `.service` or `.timer` files change in the repo, copy them again and run `systemctl daemon-reload`; the script itself is picked up automatically.
+
+### Updating by hand
+
+With the timer paused, or to recover from a failed deploy:
 
 ```bash
 cd /opt/gnome
@@ -284,6 +335,8 @@ npm run build
 npm run deploy           # only needed when commands were added/changed
 pm2 restart gnome-bot
 ```
+
+If the timer is still enabled, its next run sees the new commit and repeats the build and restart — harmless, but pause it first to avoid the extra restart.
 
 `pm2 logs gnome-bot` tails the bot's console output; `pm2 monit` shows memory/CPU (useful since the process is capped at 512 MB via `--max-memory-restart`).
 

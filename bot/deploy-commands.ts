@@ -77,7 +77,9 @@ const rest = new REST().setToken(DISCORD_TOKEN);
       `Successfully reloaded ${data.length} application (/) commands.`
     );
   } catch (error) {
-    // And of course, make sure you catch and log any errors!
     console.error(error);
+    // Exit non-zero so `npm run deploy` and bot/deploy/gnome-bot-deploy.sh stop
+    // instead of treating a rejected registration as a success.
+    process.exitCode = 1;
   }
 })();

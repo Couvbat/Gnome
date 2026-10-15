@@ -205,21 +205,15 @@ Known coverage gaps:
 
 ## Continuous integration
 
-```yaml
-- name: Bot tests
-  working-directory: ./bot
-  run: npm test
+GitHub Actions runs each package's suite on pull requests that touch it, and again before every deploy — a red run blocks the deploy:
 
-- name: Backend tests
-  working-directory: ./backend
-  run: |
-    npm test
-    npm test -- --testNamePattern="e2e"
+| Workflow | Package | Steps |
+|---|---|---|
+| `.github/workflows/bot-build.yml` | `bot/` | `npm test`, `npm run build` (Node 22); also runs on every push to `main`, which is the run the NAS waits for before deploying |
+| `.github/workflows/backend-build.yml` | `backend/` | lint, `npm test` (unit + e2e), `npm run build` (Node 24) |
+| `.github/workflows/frontend-build.yml` | `frontend/` | lint, `npm run type-check`, `npm test`, `npm run build` (Node 24) |
 
-- name: Frontend tests
-  working-directory: ./frontend
-  run: npm test
-```
+Every external service is mocked, so none of them needs a secret or a database. See the deployment sections of the package READMEs for what happens after the build.
 
 ## Further reading
 

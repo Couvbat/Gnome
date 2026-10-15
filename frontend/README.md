@@ -154,16 +154,31 @@ All four games connect to the backend's REST API for solo actions and Socket.io 
 
 The frontend deploys to **o2switch (cPanel)** as plain static files on its own subdomain (e.g. `casino.example.com`), next to the [backend](../backend/README.md#deployment) on `api.example.com`. In production the app runs **inside Discord** — traffic flows through Discord's Activity proxy (`<app-id>.discordsays.com`), not directly to your domains.
 
-### Build
+### Automated deployment
 
-Vite bakes `VITE_*` variables into the bundle at build time, so build with production values (a `.env.production` file is picked up automatically by `npm run build`):
+GitHub Actions builds and uploads the frontend, with the same pipeline as the backend (and the portfolio) — see the [backend deployment notes](../backend/README.md#automated-deployment) for how it works and the full list of secrets.
+
+- [`frontend-build.yml`](../.github/workflows/frontend-build.yml) runs `npm ci`, lint, `npm run type-check`, `npm test` and `npm run build` (Node 24). It runs on PRs touching `frontend/**`, and is called by the deploy.
+- [`frontend-deploy.yml`](../.github/workflows/frontend-deploy.yml) runs on every push to `main` touching `frontend/**` or `.github/workflows/frontend-*.yml`, or manually (Actions → Deploy Frontend → Run workflow). It whitelists the runner's IP in cPanel and rsyncs `dist/` into `FRONTEND_REMOTE_PATH` with `--delete`, keeping `.well-known` (AutoSSL challenges), `cgi-bin`, `.env`, `.htpasswd` and `error_log`. Before syncing, it resolves `FRONTEND_REMOTE_PATH` on the server (`pwd -P`, so `.`, `..`, doubled slashes and symlinks are all resolved) and refuses unless it is an existing directory strictly below the account's home. rsync then targets that resolved path, because `--delete` into the home directory would wipe everything else hosted there.
+
+Vite bakes `VITE_*` variables into the bundle at build time, so they come from **repository variables** (Settings → Secrets and variables → Actions → Variables), not from the server:
+
+| Variable | |
+|---|---|
+| `VITE_DISCORD_CLIENT_ID` | required — the production Discord application ID. The deploy fails early if it's missing, rather than shipping a bundle that can't authenticate. |
+| `VITE_WS_URL` | optional — explicit backend origin for the WebSocket. When unset, the socket targets the page origin, which resolves through the Discord proxy's `/socket.io` URL mapping (see below). |
+
+Secrets needed: `CPANEL_USERNAME`, `CPANEL_SERVER`, `CPANEL_API_TOKEN`, `SSH_KEY` and `FRONTEND_REMOTE_PATH` (the subdomain's document root, e.g. `/home/<user>/casino.example.com`).
+
+In cPanel, create the subdomain and enable AutoSSL for it — HTTPS is mandatory for Activities. The app has no client-side router, so no `.htaccess` rewrite rules are needed.
+
+### Manual build and upload
+
+If GitHub Actions is unavailable, build locally with production values (a `.env.production` file is picked up automatically by `npm run build`):
 
 ```env
 # .env.production
 VITE_DISCORD_CLIENT_ID=your_production_app_id
-# Optional: explicit backend origin for the WebSocket. When unset, the socket
-# targets the page origin, which resolves through the Discord proxy's
-# /socket.io URL mapping (see below).
 # VITE_WS_URL=https://api.example.com
 ```
 
@@ -171,9 +186,7 @@ VITE_DISCORD_CLIENT_ID=your_production_app_id
 npm run build   # outputs dist/
 ```
 
-### Upload
-
-Copy the *contents* of `dist/` to the subdomain's document root (cPanel File Manager, SFTP, or `rsync` over SSH). Enable AutoSSL for the subdomain — HTTPS is mandatory for Activities. The app has no client-side router, so no `.htaccess` rewrite rules are needed.
+Then copy the *contents* of `dist/` to the subdomain's document root (cPanel File Manager, SFTP, or `rsync` over SSH).
 
 ### Discord Developer Portal — URL mappings
 
@@ -196,7 +209,7 @@ Note: outside Discord (plain browser), the deployed frontend can't reach the bac
 
 ### Updating
 
-Rebuild locally (`npm run build`) and re-upload `dist/`. If commands or mappings changed, re-check the Developer Portal configuration.
+Merging to `main` deploys automatically. If the URL mappings changed, re-check the Developer Portal configuration — that part isn't automated.
 
 ## Troubleshooting
 

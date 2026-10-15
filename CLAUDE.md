@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Each package has its own `package.json`, `tsconfig.json`, `.env`, and `__tests__/` directory. There is no root-level build or test script — work inside the relevant package directory.
 
-Production hosting: the bot is self-hosted in an Ubuntu LXC container on TrueNAS under pm2, with a self-hosted MongoDB on the same LAN (`bot/README.md#deployment`). The backend deploys to o2switch cPanel via Setup Node.js App/Passenger, and the frontend as static files on an o2switch subdomain, both reaching that same home MongoDB over the internet (`backend/README.md#deployment`, `frontend/README.md#deployment`).
+Production hosting: the bot is self-hosted in an Ubuntu LXC container on TrueNAS under pm2, with a self-hosted MongoDB on the same LAN (`bot/README.md#deployment`). The backend deploys to o2switch cPanel via Setup Node.js App/Passenger, and the frontend as static files on an o2switch subdomain, both reaching that same home MongoDB over the internet (`backend/README.md#deployment`, `frontend/README.md#deployment`). Deploys run from `main`: `.github/workflows/{backend,frontend}-deploy.yml` push to o2switch, and the bot's container runs `bot/deploy/gnome-bot-deploy.sh` on a systemd timer, which waits for `bot-build.yml` to pass. Merging to `main` is a production deploy.
 
 ## Commands
 
