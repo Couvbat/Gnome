@@ -265,8 +265,11 @@ export const command: Command = {
 
       // Handle bet type selection
       if (buttonInteraction.customId === 'bet_number') {
+        // Unique per game: awaitModalSubmit has no default filter and would
+        // otherwise also collect modals submitted in other players' games.
+        const modalId = `roulette_number_modal_${interaction.id}`;
         const modal = new ModalBuilder()
-          .setCustomId('roulette_number_modal')
+          .setCustomId(modalId)
           .setTitle('Choisissez votre numéro');
         const input = new TextInputBuilder()
           .setCustomId('number_input')
@@ -278,7 +281,10 @@ export const command: Command = {
         modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
         await buttonInteraction.showModal(modal);
 
-        const modalSubmit = await buttonInteraction.awaitModalSubmit({ time: 30000 }).catch(() => null);
+        const modalSubmit = await buttonInteraction.awaitModalSubmit({
+          time: 30000,
+          filter: (submit) => submit.customId === modalId && submit.user.id === userId
+        }).catch(() => null);
         if (!modalSubmit) {
           // Timeout — do nothing; no bet was placed, so the outer collector's
           // own 'end' handler will refund once it also times out.
@@ -288,6 +294,16 @@ export const command: Command = {
         const chosenNumber = parseInt(modalSubmit.fields.getTextInputValue('number_input'));
         if (isNaN(chosenNumber) || chosenNumber < 0 || chosenNumber > 36) {
           await modalSubmit.reply({ content: '❌ Numéro invalide (0-36).', ephemeral: true });
+          return;
+        }
+
+        // The modal can outlive the 60s collector: if the game already timed
+        // out, the 'end' handler has refunded the bet, so it must not be played.
+        if (collector.ended) {
+          await modalSubmit.reply({
+            content: '⏱️ Temps écoulé ! Cette partie est terminée, votre numéro n\'a pas été joué.',
+            ephemeral: true
+          });
           return;
         }
 
