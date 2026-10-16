@@ -351,5 +351,25 @@ describe('Listen Command', () => {
       expect(listen).toBeDefined();
     });
   });
+
+  describe('Module side effects', () => {
+    test('temp file cleanup timer should not keep a process alive', async () => {
+      // deploy-commands.js imports every command module to read its slash
+      // command data; a referenced timer started at import kept it running
+      // forever after registering the commands.
+      const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+      vi.resetModules();
+      await import('../commands/listen');
+
+      const timers = setIntervalSpy.mock.results.map(result => result.value as NodeJS.Timeout);
+      setIntervalSpy.mockRestore();
+      timers.forEach(timer => clearInterval(timer));
+
+      expect(timers.length).toBeGreaterThan(0);
+      for (const timer of timers) {
+        expect(timer.hasRef()).toBe(false);
+      }
+    });
+  });
 });
 

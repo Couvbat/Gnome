@@ -76,7 +76,10 @@ const TEMP_FILE_MAX_AGE = 60 * 60 * 1000; // 1 hour
 // talking) can hold the capture pipeline open indefinitely.
 const MAX_RECORDING_DURATION_MS = 90 * 1000; // 90 seconds
 
-// Cleanup old temp files periodically
+// Cleanup old temp files periodically. Unref'd so this timer alone never keeps
+// a process alive: deploy-commands.js imports this module to read its slash
+// command data and would otherwise never exit. The bot itself stays up through
+// its gateway connection, so the sweep keeps running there.
 setInterval(() => {
   try {
     const tempDir = path.join(__dirname, "../temp");
@@ -106,7 +109,7 @@ setInterval(() => {
   } catch (error) {
     console.error('[Listen] Error during temp file cleanup:', error);
   }
-}, TEMP_CLEANUP_INTERVAL);
+}, TEMP_CLEANUP_INTERVAL).unref();
 
 export const command: Command = {
   data: new SlashCommandBuilder()
