@@ -35,9 +35,14 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
-      '/socket.io': {
+      // The client connects on /socket, as it does through the Discord proxy's
+      // URL mapping; the backend serves Socket.io on its default /socket.io.
+      // A regex key, because a plain '/socket' prefix would also match
+      // '/socket.io'.
+      '^/socket/': {
         target: 'http://localhost:3001',
         ws: true,
+        rewrite: (path) => path.replace(/^\/socket\//, '/socket.io/'),
       },
     },
     // Allow external access (needed for Discord Activity local development)

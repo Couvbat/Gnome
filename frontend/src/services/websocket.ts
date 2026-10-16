@@ -14,13 +14,15 @@ class WebSocketService {
       return;
     }
 
-    // Backend origin baked at build time via VITE_WS_URL. When unset, the
-    // socket targets the page origin, which both dev (Vite proxies
-    // /socket.io to :3001) and the Discord Activity proxy (a /socket.io URL
-    // mapping in the Developer Portal) resolve to the backend.
-    const wsUrl = (import.meta.env.VITE_WS_URL as string | undefined) || window.location.origin;
+    // Backend origin baked at build time via VITE_WS_URL, reached directly on
+    // Socket.io's default /socket.io path. When unset, the socket targets the
+    // page origin on /socket instead: the Discord Activity proxy (a /socket URL
+    // mapping in the Developer Portal) and the Vite dev proxy both forward it
+    // to the backend's /socket.io.
+    const backendUrl = import.meta.env.VITE_WS_URL as string | undefined;
 
-    this.socket = io(wsUrl, {
+    this.socket = io(backendUrl || window.location.origin, {
+      path: backendUrl ? '/socket.io' : '/socket',
       auth: { token: authToken },
       transports: ['websocket'],
     });
